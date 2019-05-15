@@ -28,7 +28,7 @@ namespace MySql.Data.MySqlClient
             Error
         }
 
-        public const string Version = "2.1";
+        public const string Version = "2.2";
 
         MySqlDatabase _database = new MySqlDatabase();
         MySqlServer _server = new MySqlServer();
@@ -62,7 +62,7 @@ namespace MySql.Data.MySqlClient
         bool _nameIsSet = false;
         bool _isNewDatabase = false;
         Dictionary<string, bool> _dicImportRoutines = new Dictionary<string, bool>();
-        bool _createViewDetected = false;
+        //bool _createViewDetected = false;
 
         enum NextImportAction
         {
@@ -122,7 +122,7 @@ namespace MySql.Data.MySqlClient
         {
             AppDomain.CurrentDomain.AssemblyResolve += CurrentDomain_AssemblyResolve;
             _database.GetTotalRowsProgressChanged += _database_GetTotalRowsProgressChanged;
-            
+
             timerReport = new Timer();
             timerReport.Elapsed += timerReport_Elapsed;
 
@@ -131,7 +131,7 @@ namespace MySql.Data.MySqlClient
 
         private Assembly CurrentDomain_AssemblyResolve(object sender, ResolveEventArgs args)
         {
-            System.IO.File.WriteAllText("mysql_error_log.txt", "hi :)");
+            //System.IO.File.WriteAllText("mysql_error_log.txt", "hi :)");
             AssemblyName asname = new AssemblyName(args.Name);
             if (asname.Name == "MySql.Data")
             {
@@ -419,7 +419,60 @@ namespace MySql.Data.MySqlClient
                 }
             }
 
+            dic = Export_RearrangeTableOrderForForeignKey(dic);
+
             return dic;
+        }
+
+        Dictionary<string, string> Export_RearrangeTableOrderForForeignKey(Dictionary<string, string> dic1)
+        {
+            System.Data.DataTable dtForeignKeyTables = QueryExpress.GetTable(Command, string.Format("select table_name, referenced_table_name from information_schema.key_column_usage where constraint_schema='{0}' and referenced_table_name IS NOT NULL;", QueryExpress.EscapeStringSequence(_database.Name)));
+            if (dtForeignKeyTables.Rows.Count == 0)
+                return dic1;
+
+            Dictionary<string, string> dic2 = new Dictionary<string, string>();
+
+            bool requireLoop = true;
+
+            while (requireLoop)
+            {
+                requireLoop = false;
+
+                foreach (var kv in dic1)
+                {
+                    if (dic2.ContainsKey(kv.Key))
+                        continue;
+
+                    bool handledInForeignKeySearch = false;
+
+                    for (int i = 0; i < dtForeignKeyTables.Rows.Count; i++)
+                    {
+                        string _tb_name = dtForeignKeyTables.Rows[i]["table_name"] + "";
+                        string _fk_tb_name = dtForeignKeyTables.Rows[i]["referenced_table_name"] + "";
+
+                        if (kv.Key == _tb_name)
+                        {
+                            handledInForeignKeySearch = true;
+
+                            if (dic2.ContainsKey(_fk_tb_name))
+                            {
+                                dic2[kv.Key] = kv.Value;
+                                requireLoop = true;
+                            }
+                            
+                            continue;
+                        }
+                    }
+
+                    if (!handledInForeignKeySearch)
+                    {
+                        dic2[kv.Key] = kv.Value;
+                        requireLoop = true;
+                    }
+                }
+            }
+
+            return dic2;
         }
 
         void Export_Rows(string tableName, string selectSQL)
@@ -678,7 +731,7 @@ namespace MySql.Data.MySqlClient
                 else
                     sb.AppendFormat(",");
 
-                
+
                 object ob = rdr[i];
                 var col = table.Columns[columnName];
 
@@ -1070,7 +1123,7 @@ namespace MySql.Data.MySqlClient
                 throw new Exception("MySqlCommand.Connection is not opened.");
             }
 
-            _createViewDetected = false;
+            //_createViewDetected = false;
             _dicImportRoutines = new Dictionary<string, bool>();
             stopProcess = false;
             GetSHA512HashFromPassword(ImportInfo.EncryptionPassword);
@@ -1231,31 +1284,22 @@ namespace MySql.Data.MySqlClient
             string _importQuery = _sbImport.ToString();
 
             bool skipexecute = false;
-
-            // collecting routines
-
             if (_importQuery[0].ToString().ToUpper() == "C")
             {
                 string _iq = _importQuery.ToLower();
-
                 if (_iq.StartsWith("create "))
                 {
-
-                    if (_iq.StartsWith("create table ") ||
-                    _iq.StartsWith("create database ") ||
-                    _iq.StartsWith("create schema "))
-                    {
-                        // do nothing
-                    }
-                    else
+                    string[] splitoption = new string[] { " as " };
+                    string[] _saq = _iq.Split(splitoption, 1, StringSplitOptions.RemoveEmptyEntries);
+                    if (_saq[0].Contains(" view "))
                     {
                         _dicImportRoutines[_importQuery] = false;
                         skipexecute = true;
                     }
                 }
-            } 
-            
-            if(!skipexecute)
+            }
+
+            if (!skipexecute)
             {
                 _mySqlScript.Query = _importQuery;
                 _mySqlScript.Delimiter = _delimiter;
@@ -1265,6 +1309,48 @@ namespace MySql.Data.MySqlClient
             _sbImport.Clear();
             _sbImport = new StringBuilder();
             GC.Collect();
+
+            //_sbImport.AppendLine(line);
+            //if (!line.EndsWith(_delimiter))
+            //    return;
+
+            //string _importQuery = _sbImport.ToString();
+
+            //bool skipexecute = false;
+
+            //// collecting routines
+
+            //if (_importQuery[0].ToString().ToUpper() == "C")
+            //{
+            //    string _iq = _importQuery.ToLower();
+
+            //    if (_iq.StartsWith("create "))
+            //    {
+
+            //        if (_iq.StartsWith("create table ") ||
+            //        _iq.StartsWith("create database ") ||
+            //        _iq.StartsWith("create schema "))
+            //        {
+            //            // do nothing
+            //        }
+            //        else
+            //        {
+            //            _dicImportRoutines[_importQuery] = false;
+            //            skipexecute = true;
+            //        }
+            //    }
+            //}
+
+            //if (!skipexecute)
+            //{
+            //    _mySqlScript.Query = _importQuery;
+            //    _mySqlScript.Delimiter = _delimiter;
+            //    _mySqlScript.Execute();
+            //}
+
+            //_sbImport.Clear();
+            //_sbImport = new StringBuilder();
+            //GC.Collect();
         }
 
         bool Import_IsEmptyLine(string line)
@@ -1323,7 +1409,7 @@ namespace MySql.Data.MySqlClient
                         }
                         break;
                     }
-                    catch(Exception ex)
+                    catch (Exception ex)
                     {
                         _dicViewErr[kv.Key] = ex;
                     }
@@ -1337,7 +1423,7 @@ namespace MySql.Data.MySqlClient
 
             if (_dicViewErr.Count > 0)
             {
-                foreach(var kv in _dicViewErr)
+                foreach (var kv in _dicViewErr)
                 {
                     _lastError = kv.Value;
                     if (ImportInfo.IgnoreSqlError)

@@ -2,7 +2,7 @@
 using System.Timers;
 using System.Collections.Generic;
 using System.Text;
-using Devart.Data.MySql;
+using MySql.Data.MySqlClient;
 using System.ComponentModel;
 using System.IO;
 using System.IO.Compression;
@@ -10,7 +10,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Reflection;
 
-namespace Devart.Data.MySql
+namespace MySql.Data.MySqlClient
 {
     public class MySqlBackup : IDisposable
     {
@@ -57,11 +57,12 @@ namespace Devart.Data.MySql
         long _currentBytes = 0L;
         long _totalBytes = 0L;
         StringBuilder _sbImport = null;
-        //MySqlScript _mySqlScript = null;
+        MySqlScript _mySqlScript = null;
         string _delimiter = "";
         bool _nameIsSet = false;
         bool _isNewDatabase = false;
         Dictionary<string, bool> _dicImportRoutines = new Dictionary<string, bool>();
+        //bool _createViewDetected = false;
 
         enum NextImportAction
         {
@@ -69,7 +70,7 @@ namespace Devart.Data.MySql
             SetNames,
             CreateNewDatabase,
             AppendLine,
-            //ChangeDelimiter,
+            ChangeDelimiter,
             AppendLineAndExecute
         }
 
@@ -121,7 +122,7 @@ namespace Devart.Data.MySql
         {
             AppDomain.CurrentDomain.AssemblyResolve += CurrentDomain_AssemblyResolve;
             _database.GetTotalRowsProgressChanged += _database_GetTotalRowsProgressChanged;
-            
+
             timerReport = new Timer();
             timerReport.Elapsed += timerReport_Elapsed;
 
@@ -1130,7 +1131,7 @@ namespace Devart.Data.MySql
             timeStart = DateTime.Now;
             _currentBytes = 0L;
             _sbImport = new StringBuilder();
-            //_mySqlScript = new MySqlScript(Command.Connection);
+            _mySqlScript = new MySqlScript(Command.Connection);
             currentProcess = ProcessType.Import;
             processCompletionType = ProcessEndType.Complete;
             _delimiter = ";";
@@ -1185,9 +1186,9 @@ namespace Devart.Data.MySql
                 case NextImportAction.AppendLine:
                     Import_AppendLine(line);
                     break;
-                //case NextImportAction.ChangeDelimiter:
-                //    Import_ChangeDelimiter(line);
-                //    break;
+                case NextImportAction.ChangeDelimiter:
+                    Import_ChangeDelimiter(line);
+                    break;
                 case NextImportAction.AppendLineAndExecute:
                     Import_AppendLineAndExecute(line);
                     break;
@@ -1231,8 +1232,8 @@ namespace Devart.Data.MySql
             if (line.EndsWith(_delimiter))
                 return NextImportAction.AppendLineAndExecute;
 
-            //if (line.StartsWith("DELIMITER ", StringComparison.OrdinalIgnoreCase))
-            //    return NextImportAction.ChangeDelimiter;
+            if (line.StartsWith("DELIMITER ", StringComparison.OrdinalIgnoreCase))
+                return NextImportAction.ChangeDelimiter;
 
             return NextImportAction.AppendLine;
         }
@@ -1268,11 +1269,11 @@ namespace Devart.Data.MySql
             _sbImport.AppendLine(line);
         }
 
-        //void Import_ChangeDelimiter(string line)
-        //{
-        //    string nextDelimiter = line.Substring(9);
-        //    _delimiter = nextDelimiter.Replace(" ", string.Empty);
-        //}
+        void Import_ChangeDelimiter(string line)
+        {
+            string nextDelimiter = line.Substring(9);
+            _delimiter = nextDelimiter.Replace(" ", string.Empty);
+        }
 
         void Import_AppendLineAndExecute(string line)
         {
@@ -1300,11 +1301,9 @@ namespace Devart.Data.MySql
 
             if (!skipexecute)
             {
-                Command.CommandText = _importQuery;
-                Command.ExecuteNonQuery();
-                //_mySqlScript.Query = _importQuery;
-                //_mySqlScript.Delimiter = _delimiter;
-                //_mySqlScript.Execute();
+                _mySqlScript.Query = _importQuery;
+                _mySqlScript.Delimiter = _delimiter;
+                _mySqlScript.Execute();
             }
 
             _sbImport.Clear();
@@ -1396,13 +1395,12 @@ namespace Devart.Data.MySql
                         break;
                     }
 
-                    //_mySqlScript.Query = kv.Key;
-                    //_mySqlScript.Delimiter = _delimiter;
-                    Command.CommandText = kv.Key;
+                    _mySqlScript.Query = kv.Key;
+                    _mySqlScript.Delimiter = _delimiter;
 
                     try
                     {
-                        Command.ExecuteNonQuery();
+                        _mySqlScript.Execute();
                         excutedOnce = true;
                         lastExecutedView = kv.Key;
                         if (_dicViewErr.ContainsKey(kv.Key))
@@ -1611,7 +1609,7 @@ namespace Devart.Data.MySql
 
             try
             {
-                //_mySqlScript = null;
+                _mySqlScript = null;
             }
             catch { }
         }
