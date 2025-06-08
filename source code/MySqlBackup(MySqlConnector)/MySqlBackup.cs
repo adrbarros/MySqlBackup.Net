@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -69,6 +70,11 @@ namespace MySqlConnector
         MySqlScript _mySqlScript = null;
         string _delimiter = string.Empty;
 
+        // for used of AdjustedColumnValue
+        bool _hasAdjustedValueRule = false;
+        bool _currentTableHasAdjustedValueRule = false;
+        Dictionary<string, Func<object, object>> _currentTableColumnValueAdjustment = null;
+
         enum NextImportAction
         {
             Ignore,
@@ -126,13 +132,10 @@ namespace MySqlConnector
 
         void InitializeComponents()
         {
-            //AppDomain.CurrentDomain.AssemblyResolve += CurrentDomain_AssemblyResolve;
             _database.GetTotalRowsProgressChanged += _database_GetTotalRowsProgressChanged;
 
             timerReport = new Timer();
             timerReport.Elapsed += timerReport_Elapsed;
-
-            //textEncoding = new UTF8Encoding(false);
         }
 
         void _database_GetTotalRowsProgressChanged(object sender, GetTotalRowsArgs e)
@@ -161,17 +164,29 @@ namespace MySqlConnector
         public void ExportToFile(string filePath)
         {
             string dir = Path.GetDirectoryName(filePath);
-
-            if (!Directory.Exists(dir))
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
             {
                 Directory.CreateDirectory(dir);
             }
 
-            using (textWriter = new StreamWriter(filePath, false, textEncoding))
+            FileStream fileStream = null;
+            StreamWriter writer = null;
+
+            try
             {
+                fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
+                writer = new StreamWriter(fileStream, textEncoding);
+                textWriter = writer;
+
                 ExportStart();
-                textWriter.Close();
             }
+            finally
+            {
+                textWriter = null;
+                writer?.Dispose();
+                fileStream?.Dispose();
+            }
+
         }
 
         public void ExportToTextWriter(TextWriter tw)
@@ -238,7 +253,7 @@ namespace MySqlConnector
 
                     textWriter.Flush();
 
-                    stage = stage + 1;
+                    stage++;
                 }
 
                 if (stopProcess) processCompletionType = ProcessEndType.Cancelled;
@@ -260,24 +275,19 @@ namespace MySqlConnector
         {
             if (Command == null)
             {
-                throw new Exception("MySqlCommand is not initialized. Object not set to an instance of an object.");
+                throw new InvalidOperationException("MySqlCommand is not initialized. Please provide a valid MySqlCommand instance before calling export methods.");
             }
 
             if (Command.Connection == null)
             {
-                throw new Exception("MySqlCommand.Connection is not initialized. Object not set to an instance of an object.");
+                throw new InvalidOperationException("MySqlCommand.Connection is not initialized. Please ensure the MySqlCommand has a valid connection.");
             }
 
             if (Command.Connection.State != System.Data.ConnectionState.Open)
             {
-                throw new Exception("MySqlCommand.Connection is not opened.");
+                throw new InvalidOperationException("MySqlCommand.Connection is not open. Please open the connection before calling export methods.");
             }
 
-            if (ExportInfo.BlobExportMode == BlobDataExportMode.BinaryChar &&
-                !ExportInfo.BlobExportModeForBinaryStringAllow)
-            {
-                throw new Exception("[ExportInfo.BlobExportMode = BlobDataExportMode.BinaryString] is still under development. Please join the discussion at https://github.com/MySqlBackupNET/MySqlBackup.Net/issues (Title: Help requires. Unable to export BLOB in Char Format)");
-            }
 
             timeStart = DateTime.Now;
 
@@ -286,10 +296,10 @@ namespace MySqlConnector
             currentProcess = ProcessType.Export;
             _lastError = null;
             timerReport.Interval = ExportInfo.IntervalForProgressReport;
-            //GetSHA512HashFromPassword(ExportInfo.EncryptionPassword);
 
             _database.GetDatabaseInfo(Command, ExportInfo.GetTotalRowsMode);
             _server.GetServerInfo(Command);
+            _hasAdjustedValueRule = ExportInfo.TableColumnValueAdjustments != null;
             _currentTableName = string.Empty;
             _totalRowsInCurrentTable = 0L;
             _totalRowsInAllTables = Export_GetTablesToBeExported()
@@ -571,6 +581,20 @@ namespace MySqlConnector
         {
             _currentRowIndexInCurrentTable = 0L;
 
+            if (_hasAdjustedValueRule)
+            {
+                if (ExportInfo.TableColumnValueAdjustments.ContainsKey(tableName))
+                {
+                    _currentTableHasAdjustedValueRule = true;
+                    _currentTableColumnValueAdjustment = ExportInfo.TableColumnValueAdjustments[tableName];
+                }
+                else
+                {
+                    _currentTableHasAdjustedValueRule = false;
+                    _currentTableColumnValueAdjustment = null;
+                }
+            }
+
             if (ExportInfo.RowsExportMode == RowsDataExportMode.Insert ||
                 ExportInfo.RowsExportMode == RowsDataExportMode.InsertIgnore ||
                 ExportInfo.RowsExportMode == RowsDataExportMode.Replace)
@@ -594,65 +618,93 @@ namespace MySqlConnector
             Command.CommandText = selectSQL;
             MySqlDataReader rdr = Command.ExecuteReader();
 
-            string insertStatementHeader = null;
+            string insertStatementHeader = Export_GetInsertStatementHeader(ExportInfo.RowsExportMode, tableName, rdr);
 
-            var sb = new StringBuilder((int)ExportInfo.MaxSqlLength);
+            long newLineBreakLength = (long)Environment.NewLine.Length;
+            long currentSqlLength = 0L;
+            bool isNewSQLStatement = true;
+            bool isFirstSQLValueBlock = true;
+            bool isFirstRowRead = true;
 
             while (rdr.Read())
             {
                 if (stopProcess)
                     return;
 
-                _currentRowIndexInAllTable = _currentRowIndexInAllTable + 1;
-                _currentRowIndexInCurrentTable = _currentRowIndexInCurrentTable + 1;
+                _currentRowIndexInAllTable++;
+                _currentRowIndexInCurrentTable++;
 
-                if (insertStatementHeader == null)
+                // secondary level temporary data cache
+                // we can't write this directly to the stream (textWriter) yet
+                // we still need to use it to calculate the length of characters
+                // preventing the SQL statement from being too long to hit MySQL server's max_allowed_packet
+                // or limit set by ExportInfo.MaxSqlLength
+                string sqlValueString = Export_GetValueString(rdr, table);
+
+                long forecastSqlStatementLength = (long)sqlValueString.Length + currentSqlLength + 1L; // 1 more for comma or ; the closing statement
+
+                if (ExportInfo.InsertLineBreakBetweenInserts)
+                    forecastSqlStatementLength += newLineBreakLength;
+
+                if (forecastSqlStatementLength > ExportInfo.MaxSqlLength)
                 {
-                    insertStatementHeader = Export_GetInsertStatementHeader(ExportInfo.RowsExportMode, tableName, rdr);
+                    isNewSQLStatement = true;
                 }
 
-                string sqlDataRow = Export_GetValueString(rdr, table);
+                if (isNewSQLStatement)
+                {
+                    isNewSQLStatement = false;
+                    isFirstSQLValueBlock = true;
 
-                if (sb.Length == 0)
-                {
-                    if (ExportInfo.InsertLineBreakBetweenInserts)
-                        sb.AppendLine(insertStatementHeader);
+                    if (isFirstRowRead)
+                    {
+                        isFirstRowRead = false;
+                    }
                     else
-                        sb.Append(insertStatementHeader);
-                    sb.Append(sqlDataRow);
+                    {
+                        textWriter.WriteLine(";");
+                        textWriter.Flush();
+                        currentSqlLength = 0L;
+                    }
+
+                    textWriter.Write(insertStatementHeader);
+                    currentSqlLength = (long)insertStatementHeader.Length;
+
+                    if (ExportInfo.InsertLineBreakBetweenInserts)
+                    {
+                        textWriter.WriteLine();
+                        currentSqlLength += newLineBreakLength;
+                    }
                 }
-                else if ((long)sb.Length + (long)sqlDataRow.Length < ExportInfo.MaxSqlLength)
+
+                if (isFirstSQLValueBlock)
                 {
-                    if (ExportInfo.InsertLineBreakBetweenInserts)
-                        sb.AppendLine(",");
-                    else
-                        sb.Append(",");
-                    sb.Append(sqlDataRow);
+                    isFirstSQLValueBlock = false;
                 }
                 else
                 {
-                    sb.AppendFormat(";");
+                    textWriter.Write(",");
+                    currentSqlLength++;
 
-                    Export_WriteLine(sb.ToString());
-                    textWriter.Flush();
-
-                    sb = new StringBuilder((int)ExportInfo.MaxSqlLength);
-                    sb.AppendLine(insertStatementHeader);
-                    sb.Append(sqlDataRow);
+                    if (ExportInfo.InsertLineBreakBetweenInserts)
+                    {
+                        textWriter.WriteLine();
+                        currentSqlLength += newLineBreakLength;
+                    }
                 }
+
+                textWriter.Write(sqlValueString);
+                currentSqlLength += (long)sqlValueString.Length;
             }
 
             rdr.Close();
 
-            if (sb.Length > 0)
+            if (!isFirstRowRead)
             {
-                sb.Append(";");
+                textWriter.WriteLine(";");
             }
 
-            Export_WriteLine(sb.ToString());
             textWriter.Flush();
-
-            sb = null;
         }
 
         void Export_RowsData_OnDuplicateKeyUpdate(string tableName, string selectSQL)
@@ -766,7 +818,7 @@ namespace MySqlConnector
             rdr.Close();
         }
 
-        private string Export_GetInsertStatementHeader(RowsDataExportMode rowsExportMode, string tableName, MySqlDataReader rdr)
+        string Export_GetInsertStatementHeader(RowsDataExportMode rowsExportMode, string tableName, MySqlDataReader rdr)
         {
             StringBuilder sb = new StringBuilder();
 
@@ -798,7 +850,7 @@ namespace MySqlConnector
             return sb.ToString();
         }
 
-        private string Export_GetValueString(MySqlDataReader rdr, MySqlTable table)
+        string Export_GetValueString(MySqlDataReader rdr, MySqlTable table)
         {
             StringBuilder sb = new StringBuilder();
 
@@ -814,34 +866,31 @@ namespace MySqlConnector
                 else
                     sb.AppendFormat(",");
 
-
                 object ob = rdr[i];
                 var col = table.Columns[columnName];
 
-                var adjustedValue = ExportInfo.AdjustColumnValue(new InfoObjects.ColumnWithValue
+                // perform value adjustment
+                if (_currentTableHasAdjustedValueRule && _currentTableColumnValueAdjustment.TryGetValue(columnName, out var adjustFunc))
                 {
-                    TableName = table.Name,
-                    Value = ob,
-                    ColumnName = columnName,
-                    MySqlDataType = col.MySqlDataType
-                });
-                //sb.Append(QueryExpress.ConvertToSqlFormat(rdr, i, true, true, col));
-                sb.Append(QueryExpress.ConvertToSqlFormat(adjustedValue, true, true, col, ExportInfo.BlobExportMode));
+                    ob = adjustFunc(ob);
+                }
+
+                Export_ConvertToSqlValueFormat(sb, ob, col, true, true);
             }
 
             sb.AppendFormat(")");
             return sb.ToString();
         }
 
-        private void Export_GetUpdateString(MySqlDataReader rdr, MySqlTable table, StringBuilder sb)
+        void Export_GetUpdateString(MySqlDataReader rdr, MySqlTable table, StringBuilder sb)
         {
             bool isFirst = true;
 
             for (int i = 0; i < rdr.FieldCount; i++)
             {
-                string colName = rdr.GetName(i);
+                string columnName = rdr.GetName(i);
 
-                var col = table.Columns[colName];
+                var col = table.Columns[columnName];
 
                 if (!col.IsPrimaryKey)
                 {
@@ -851,31 +900,31 @@ namespace MySqlConnector
                         sb.Append(",");
 
                     sb.Append("`");
-                    sb.Append(colName);
+                    sb.Append(columnName);
                     sb.Append("`=");
 
-                    var adjustedValue = ExportInfo.AdjustColumnValue(new InfoObjects.ColumnWithValue
+                    var ob = rdr[i];
+
+                    if (_currentTableHasAdjustedValueRule && _currentTableColumnValueAdjustment.TryGetValue(columnName, out var adjustFunc))
                     {
-                        TableName = table.Name,
-                        Value = rdr[i],
-                        ColumnName = colName,
-                        MySqlDataType = col.MySqlDataType
-                    });
+                        ob = adjustFunc(ob);
+                    }
+
                     //sb.Append(QueryExpress.ConvertToSqlFormat(rdr, i, true, true, col));
-                    sb.Append(QueryExpress.ConvertToSqlFormat(adjustedValue, true, true, col, ExportInfo.BlobExportMode));
+                    Export_ConvertToSqlValueFormat(sb, ob, col, true, true);
                 }
             }
         }
 
-        private void Export_GetConditionString(MySqlDataReader rdr, MySqlTable table, StringBuilder sb)
+        void Export_GetConditionString(MySqlDataReader rdr, MySqlTable table, StringBuilder sb)
         {
             bool isFirst = true;
 
             for (int i = 0; i < rdr.FieldCount; i++)
             {
-                string colName = rdr.GetName(i);
+                string columnName = rdr.GetName(i);
 
-                var col = table.Columns[colName];
+                var col = table.Columns[columnName];
 
                 if (col.IsPrimaryKey)
                 {
@@ -885,18 +934,239 @@ namespace MySqlConnector
                         sb.Append(" and ");
 
                     sb.Append("`");
-                    sb.Append(colName);
+                    sb.Append(columnName);
                     sb.Append("`=");
 
-                    var adjustedValue = ExportInfo.AdjustColumnValue(new InfoObjects.ColumnWithValue
+                    var ob = rdr[i];
+
+                    if (_currentTableHasAdjustedValueRule && _currentTableColumnValueAdjustment.TryGetValue(columnName, out var adjustFunc))
                     {
-                        TableName = table.Name,
-                        Value = rdr[i],
-                        ColumnName = colName,
-                        MySqlDataType = col.MySqlDataType
-                    });
+                        ob = adjustFunc(ob);
+                    }
+
                     //sb.Append(QueryExpress.ConvertToSqlFormat(rdr, i, true, true, col));
-                    sb.Append(QueryExpress.ConvertToSqlFormat(adjustedValue, true, true, col, ExportInfo.BlobExportMode));
+                    Export_ConvertToSqlValueFormat(sb, ob, col, true, true);
+                }
+            }
+        }
+
+        void Export_ConvertToSqlValueFormat(StringBuilder sb, Object ob, MySqlColumn col, bool escapeStringSequence, bool wrapStringWithSingleQuote)
+        {
+            if (ob == null || ob is System.DBNull)
+            {
+                sb.AppendFormat("NULL");
+            }
+            else if (ob is System.String)
+            {
+                string str = (string)ob;
+
+                if (escapeStringSequence)
+                    str = QueryExpress.EscapeStringSequence(str);
+
+                if (wrapStringWithSingleQuote)
+                    sb.AppendFormat("'");
+
+                sb.Append(str);
+
+                if (wrapStringWithSingleQuote)
+                    sb.AppendFormat("'");
+            }
+            else if (ob is System.Boolean)
+            {
+                sb.AppendFormat(Convert.ToInt32(ob).ToString());
+            }
+            else if (ob is System.Byte[])
+            {
+                Export_ConvertByteArrayToHexString(sb, ob);
+            }
+            else if (ob is short)
+            {
+                sb.AppendFormat(((short)ob).ToString(QueryExpress._numberFormatInfo));
+            }
+            else if (ob is int)
+            {
+                sb.AppendFormat(((int)ob).ToString(QueryExpress._numberFormatInfo));
+            }
+            else if (ob is long)
+            {
+                sb.AppendFormat(((long)ob).ToString(QueryExpress._numberFormatInfo));
+            }
+            else if (ob is ushort)
+            {
+                sb.AppendFormat(((ushort)ob).ToString(QueryExpress._numberFormatInfo));
+            }
+            else if (ob is uint)
+            {
+                sb.AppendFormat(((uint)ob).ToString(QueryExpress._numberFormatInfo));
+            }
+            else if (ob is ulong)
+            {
+                sb.AppendFormat(((ulong)ob).ToString(QueryExpress._numberFormatInfo));
+            }
+            else if (ob is double)
+            {
+                sb.AppendFormat(((double)ob).ToString(QueryExpress._numberFormatInfo));
+            }
+            else if (ob is decimal)
+            {
+                sb.AppendFormat(((decimal)ob).ToString(QueryExpress._numberFormatInfo));
+            }
+            else if (ob is float)
+            {
+                sb.AppendFormat(((float)ob).ToString(QueryExpress._numberFormatInfo));
+            }
+            else if (ob is byte)
+            {
+                sb.AppendFormat(((byte)ob).ToString(QueryExpress._numberFormatInfo));
+            }
+            else if (ob is sbyte)
+            {
+                sb.AppendFormat(((sbyte)ob).ToString(QueryExpress._numberFormatInfo));
+            }
+            else if (ob is TimeSpan)
+            {
+                TimeSpan ts = (TimeSpan)ob;
+
+                if (wrapStringWithSingleQuote)
+                    sb.AppendFormat("'");
+
+                sb.AppendFormat(((int)ts.TotalHours).ToString().PadLeft(2, '0'));
+                sb.AppendFormat(":");
+                sb.AppendFormat(ts.Duration().Minutes.ToString().PadLeft(2, '0'));
+                sb.AppendFormat(":");
+                sb.AppendFormat(ts.Duration().Seconds.ToString().PadLeft(2, '0'));
+
+                if (wrapStringWithSingleQuote)
+                    sb.AppendFormat("'");
+
+            }
+            else if (ob is System.DateTime)
+            {
+                if (wrapStringWithSingleQuote)
+                    sb.AppendFormat("'");
+
+                sb.AppendFormat(((DateTime)ob).ToString("yyyy-MM-dd HH:mm:ss", QueryExpress._dateFormatInfo));
+
+                if (col.TimeFractionLength > 0)
+                {
+                    sb.Append(".");
+                    string _microsecond = ((DateTime)ob).ToString("".PadLeft(col.TimeFractionLength, 'f'));
+                    sb.Append(_microsecond);
+                }
+
+                if (wrapStringWithSingleQuote)
+                    sb.AppendFormat("'");
+            }
+            else if (ob is MySqlDateTime mdt)
+            {
+                if (mdt.IsValidDateTime)
+                {
+                    DateTime dtime = mdt.GetDateTime();
+
+                    if (wrapStringWithSingleQuote)
+                        sb.AppendFormat("'");
+
+                    if (col.MySqlDataType == "datetime")
+                        sb.AppendFormat(dtime.ToString("yyyy-MM-dd HH:mm:ss", QueryExpress._dateFormatInfo));
+                    else if (col.MySqlDataType == "date")
+                        sb.AppendFormat(dtime.ToString("yyyy-MM-dd", QueryExpress._dateFormatInfo));
+                    else if (col.MySqlDataType == "time")
+                        sb.AppendFormat("{0}:{1}:{2}", mdt.Hour, mdt.Minute, mdt.Second);
+                    else
+                        sb.AppendFormat(dtime.ToString("yyyy-MM-dd HH:mm:ss", QueryExpress._dateFormatInfo));
+
+                    if (col.TimeFractionLength > 0)
+                    {
+                        sb.Append(".");
+                        sb.Append(((MySqlDateTime)ob).Microsecond.ToString().PadLeft(col.TimeFractionLength, '0'));
+                    }
+
+                    if (wrapStringWithSingleQuote)
+                        sb.AppendFormat("'");
+                }
+                else
+                {
+                    if (wrapStringWithSingleQuote)
+                        sb.AppendFormat("'");
+
+                    if (col.MySqlDataType == "datetime")
+                        sb.AppendFormat("0000-00-00 00:00:00");
+                    else if (col.MySqlDataType == "date")
+                        sb.AppendFormat("0000-00-00");
+                    else if (col.MySqlDataType == "time")
+                        sb.AppendFormat("00:00:00");
+                    else
+                        sb.AppendFormat("0000-00-00 00:00:00");
+
+                    if (col.TimeFractionLength > 0)
+                    {
+                        sb.Append(".".PadRight(col.TimeFractionLength, '0'));
+                    }
+
+                    if (wrapStringWithSingleQuote)
+                        sb.AppendFormat("'");
+                }
+            }
+            else if (ob is System.Guid)
+            {
+                if (col.MySqlDataType == "binary(16)")
+                {
+                    Export_ConvertByteArrayToHexString(sb, ob);
+                }
+                else if (col.MySqlDataType == "char(36)")
+                {
+                    if (wrapStringWithSingleQuote)
+                        sb.AppendFormat("'");
+
+                    sb.Append(ob);
+
+                    if (wrapStringWithSingleQuote)
+                        sb.AppendFormat("'");
+                }
+                else
+                {
+                    if (wrapStringWithSingleQuote)
+                        sb.AppendFormat("'");
+
+                    sb.Append(ob);
+
+                    if (wrapStringWithSingleQuote)
+                        sb.AppendFormat("'");
+                }
+            }
+            else
+            {
+                throw new Exception("Unhandled data type. Current processing data type: " + ob.GetType().ToString() + ". Please report this bug with this message to the development team.");
+            }
+        }
+
+        void Export_ConvertByteArrayToHexString(StringBuilder sb, object ob)
+        {
+            if (ob == null || ob == DBNull.Value)
+            {
+                sb.Append("NULL");
+            }
+            else
+            {
+                byte[] ba = (byte[])ob;
+                if (ba.Length == 0)
+                {
+                    sb.Append("''");
+                }
+                else
+                {
+                    char[] c = new char[ba.Length * 2 + 2];
+                    byte b;
+                    c[0] = '0';
+                    c[1] = 'x';
+                    for (int y = 0, x = 2; y < ba.Length; ++y, ++x)
+                    {
+                        b = ((byte)(ba[y] >> 4));
+                        c[x] = (char)(b > 9 ? b + 0x37 : b + 0x30);
+                        b = ((byte)(ba[y] & 0xF));
+                        c[++x] = (char)(b > 9 ? b + 0x37 : b + 0x30);
+                    }
+                    sb.Append(new string(c));
                 }
             }
         }
@@ -1475,23 +1745,19 @@ namespace MySqlConnector
 
         public void Dispose()
         {
-            try
-            {
-                _database.Dispose();
-            }
-            catch { }
-
-            try
-            {
-                _server = null;
-            }
-            catch { }
-
-            try
-            {
-                _mySqlScript = null;
-            }
-            catch { }
+            StopAllProcess();
+            timerReport?.Stop();
+            timerReport?.Dispose();
+            timerReport = null;
+            textWriter?.Dispose();
+            textWriter = null;
+            textReader?.Dispose();
+            textReader = null;
+            _database?.Dispose();
+            _database = null;
+            _server = null;
+            _mySqlScript = null;
+            GC.SuppressFinalize(this);
         }
     }
 }
