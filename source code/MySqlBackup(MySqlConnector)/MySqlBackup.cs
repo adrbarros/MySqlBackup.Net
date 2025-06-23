@@ -30,22 +30,12 @@ namespace MySqlConnector
         MySqlDatabase _database = new MySqlDatabase();
         MySqlServer _server = new MySqlServer();
 
-        Encoding textEncoding
-        {
-            get
-            {
+        StringBuilder _sb = null;
 
-                try
-                {
-                    return ExportInfo.TextEncoding;
-                }
-                catch { }
-                return new UTF8Encoding(false);
-            }
-        }
+        Encoding textEncoding = new UTF8Encoding(false);
 
         TextWriter textWriter;
-        TextReader textReader;
+
         DateTime timeStart;
         DateTime timeEnd;
         ProcessType currentProcess;
@@ -63,17 +53,23 @@ namespace MySqlConnector
         int _totalTables = 0;
         int _currentTableIndex = 0;
         Timer timerReport = null;
-
-        long _currentBytes = 0L;
-        long _totalBytes = 0L;
-        StringBuilder _sb = null;
-        MySqlScript _mySqlScript = null;
-        string _delimiter = string.Empty;
+        string _originalTimeZone = "";
 
         // for used of AdjustedColumnValue
         bool _hasAdjustedValueRule = false;
         bool _currentTableHasAdjustedValueRule = false;
         Dictionary<string, Func<object, object>> _currentTableColumnValueAdjustment = null;
+
+        // for used of import
+        TextReader textReader;
+        StreamReader streamReader;
+        bool canSeekStreamPosition;
+        bool useStreamReader;
+        bool _calculateBytes = false;
+        long _currentBytes = 0L;
+        long _totalBytes = 0L;
+
+        string _delimiter = string.Empty;
 
         int _initialMaxStringBuilderCapacity = 64 * 1024 * 1024;
 
@@ -158,37 +154,132 @@ namespace MySqlConnector
 
         public string ExportToString()
         {
-            using (MemoryStream ms = new MemoryStream())
+            try
             {
-                ExportToMemoryStream(ms);
-                ms.Position = 0L;
-                using (var thisReader = new StreamReader(ms, textEncoding, false, GetOptimalStreamBufferSize()))
+                string result;
+                using (MemoryStream ms = new MemoryStream())
                 {
-                    return thisReader.ReadToEnd();
+                    // Use StreamWriter directly instead of calling ExportToMemoryStream
+                    using (StreamWriter writer = new StreamWriter(ms, textEncoding, GetOptimalStreamBufferSize(), true)) // leaveOpen: true
+                    {
+                        textWriter = writer;
+                        ExportStart();
+                        textWriter.Flush();
+                        textWriter = null;
+                    }
+
+                    // Reset position and read the result
+                    ms.Position = 0L;
+                    using (var thisReader = new StreamReader(ms, textEncoding, false, GetOptimalStreamBufferSize()))
+                    {
+                        result = thisReader.ReadToEnd();
+                    }
                 }
+
+                Export_RaiseCompletionEvent();
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _lastError = ex;
+                Export_RaiseCompletionEvent();
+                throw;
+            }
+            finally
+            {
+                Export_RestoreOriginalVariables();
             }
         }
 
         public void ExportToFile(string filePath)
         {
-            string dir = Path.GetDirectoryName(filePath);
-            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+            try
             {
-                Directory.CreateDirectory(dir);
+                if (string.IsNullOrEmpty(filePath))
+                    throw new ArgumentNullException(nameof(filePath), "File path cannot be null or empty.");
+
+                string dir = Path.GetDirectoryName(filePath);
+                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+                using (FileStream fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, GetOptimalStreamBufferSize()))
+                using (StreamWriter writer = new StreamWriter(fileStream, textEncoding, GetOptimalStreamBufferSize()))
+                {
+                    textWriter = writer;
+                    ExportStart();
+                    textWriter = null;
+                }
+
+                Export_RaiseCompletionEvent();
             }
-            using (FileStream fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, GetOptimalStreamBufferSize()))
-            using (StreamWriter writer = new StreamWriter(fileStream, textEncoding, GetOptimalStreamBufferSize()))
+            catch (Exception ex)
             {
-                textWriter = writer;
-                ExportStart();
-                textWriter = null;
+                _lastError = ex;
+                Export_RaiseCompletionEvent();
+                throw;
+            }
+            finally
+            {
+                Export_RestoreOriginalVariables();
             }
         }
 
         public void ExportToTextWriter(TextWriter tw)
         {
-            textWriter = tw;
-            ExportStart();
+            try
+            {
+                if (tw == null)
+                    throw new ArgumentNullException(nameof(tw), "TextWriter cannot be null.");
+
+                textWriter = tw;
+                ExportStart();
+
+                Export_RaiseCompletionEvent();
+            }
+            catch (Exception ex)
+            {
+                _lastError = ex;
+                Export_RaiseCompletionEvent();
+                throw;
+            }
+            finally
+            {
+                Export_RestoreOriginalVariables();
+            }
+        }
+
+        public void ExportToStream(Stream sm)
+        {
+            try
+            {
+                if (sm == null)
+                    throw new ArgumentNullException(nameof(sm), "Stream cannot be null.");
+
+                if (sm.CanSeek)
+                    sm.Seek(0, SeekOrigin.Begin);
+
+                using (var writer = new StreamWriter(sm, textEncoding, GetOptimalStreamBufferSize()))
+                {
+                    textWriter = writer;
+                    ExportStart();
+                }
+
+                textWriter = null;
+
+                Export_RaiseCompletionEvent();
+            }
+            catch (Exception ex)
+            {
+                _lastError = ex;
+                Export_RaiseCompletionEvent();
+                throw;
+            }
+            finally
+            {
+                Export_RestoreOriginalVariables();
+            }
         }
 
         public void ExportToMemoryStream(MemoryStream ms)
@@ -198,36 +289,39 @@ namespace MySqlConnector
 
         public void ExportToMemoryStream(MemoryStream ms, bool resetMemoryStreamPosition)
         {
-            if (ms == null)
-            {
-                throw new ArgumentNullException(nameof(ms), "MemoryStream cannot be null.");
-            }
-            if (resetMemoryStreamPosition)
-            {
-                ms.SetLength(0);
-                ms.Position = 0L;
-            }
-            var writer = new StreamWriter(ms, textEncoding, GetOptimalStreamBufferSize(), true); // leaveOpen: true
             try
             {
-                textWriter = writer;
-                ExportStart();
-                textWriter.Flush();
+                if (ms == null)
+                {
+                    throw new ArgumentNullException(nameof(ms), "MemoryStream cannot be null.");
+                }
+
+                if (resetMemoryStreamPosition)
+                {
+                    ms.SetLength(0);
+                    ms.Position = 0L;
+                }
+                using (var writer = new StreamWriter(ms, textEncoding, GetOptimalStreamBufferSize(), true)) // leaveOpen: true
+                {
+                    textWriter = writer;
+                    ExportStart();
+                    textWriter.Flush();
+                }
+
+                textWriter = null;
+
+                Export_RaiseCompletionEvent();
+            }
+            catch (Exception ex)
+            {
+                _lastError = ex;
+                Export_RaiseCompletionEvent();
+                throw;
             }
             finally
             {
-                writer.Dispose(); // This disposes the writer but leaves ms open
-                textWriter = null;
+                Export_RestoreOriginalVariables();
             }
-        }
-
-        public void ExportToStream(Stream sm)
-        {
-            if (sm.CanSeek)
-                sm.Seek(0, SeekOrigin.Begin);
-
-            textWriter = new StreamWriter(sm, textEncoding, GetOptimalStreamBufferSize());
-            ExportStart();
         }
 
         private int GetOptimalStreamBufferSize()
@@ -236,7 +330,6 @@ namespace MySqlConnector
             int size = ExportInfo.MaxSqlLength / 100;
             return Math.Max(4096, Math.Min(262144, size)); // Min 4KB, Max 256KB
         }
-
 
         void ExportStart()
         {
@@ -304,11 +397,37 @@ namespace MySqlConnector
 
             timeStart = DateTime.Now;
 
+            if (string.IsNullOrEmpty(ExportInfo.ScriptsDelimiter))
+            {
+                throw new Exception("Script delimeter is empty");
+            }
+
+            if (ExportInfo.ScriptsDelimiter.Trim() == ";")
+            {
+                throw new Exception("Script delimeter cannot be ';'");
+            }
+
+            // Cache the timezone
+            Command.CommandText = "SELECT @@session.time_zone;";
+            _originalTimeZone = Command.ExecuteScalar() + "";
+            if (string.IsNullOrEmpty(_originalTimeZone))
+            {
+                _originalTimeZone = "SYSTEM";
+            }
+            // Important step, set the timezone to UTC 00:00 to ensure consistent timestamp values export
+            // Without this, the exported timestamp value will be shifted by timezone, resulting inaccurancy during import of data
+            Command.CommandText = "/*!40103 SET TIME_ZONE='+00:00' */;";
+            Command.ExecuteNonQuery();
+
+            ExportInfo.ScriptsDelimiter = ExportInfo.ScriptsDelimiter.Trim();
+
             stopProcess = false;
             processCompletionType = ProcessEndType.UnknownStatus;
             currentProcess = ProcessType.Export;
             _lastError = null;
             timerReport.Interval = ExportInfo.IntervalForProgressReport;
+
+            textEncoding = ExportInfo.TextEncoding;
 
             _database.GetDatabaseInfo(Command, ExportInfo.GetTotalRowsMode);
             _server.GetServerInfo(Command);
@@ -347,11 +466,15 @@ namespace MySqlConnector
             textWriter.WriteLine();
             textWriter.WriteLine();
             if (ExportInfo.AddDropDatabase)
-                Export_WriteLine(String.Format("DROP DATABASE `{0}`;", _database.Name));
+            {
+                //Export_WriteLine(String.Format("DROP DATABASE `{0}`;", _database.Name));
+                Export_WriteLine(String.Format("DROP DATABASE `{0}`;", QueryExpress.EscapeIdentifier(_database.Name)));
+            }
             if (ExportInfo.AddCreateDatabase)
             {
                 Export_WriteLine(_database.CreateDatabaseSQL);
-                Export_WriteLine(string.Format("USE `{0}`;", _database.Name));
+                //Export_WriteLine(string.Format("USE `{0}`;", _database.Name));
+                Export_WriteLine(string.Format("USE `{0}`;", QueryExpress.EscapeIdentifier(_database.Name)));
             }
             textWriter.WriteLine();
             textWriter.WriteLine();
@@ -451,7 +574,10 @@ namespace MySqlConnector
             textWriter.WriteLine();
 
             if (ExportInfo.AddDropTable)
-                Export_WriteLine(string.Format("DROP TABLE IF EXISTS `{0}`;", tableName));
+            {
+                //Export_WriteLine(string.Format("DROP TABLE IF EXISTS `{0}`;", tableName));
+                Export_WriteLine(string.Format("DROP TABLE IF EXISTS `{0}`;", QueryExpress.EscapeIdentifier(tableName)));
+            }
 
             if (ExportInfo.ResetAutoIncrement)
                 Export_WriteLine(_database.Tables[tableName].CreateTableSqlWithoutAutoIncrement);
@@ -486,7 +612,9 @@ namespace MySqlConnector
                 return _database.Tables
                     .ToDictionary(
                         table => table.Name,
-                        table => string.Format("SELECT * FROM `{0}`;", table.Name));
+                        //table => string.Format("SELECT * FROM `{0}`;", table.Name));
+                        table => string.Format("SELECT * FROM `{0}`;", QueryExpress.EscapeIdentifier(table.Name)));
+
             }
 
             return ExportInfo.TablesToBeExportedDic
@@ -537,7 +665,8 @@ namespace MySqlConnector
                         if (index.Contains(kv2.Key))
                             continue;
 
-                        string _thisTBname = string.Format("{0}{1}{0}", keyNameWrapper, kv2.Key.ToLower());
+                        //string _thisTBname = string.Format("{0}{1}{0}", keyNameWrapper, kv2.Key.ToLower());
+                        string _thisTBname = string.Format("{0}{1}{0}", keyNameWrapper, QueryExpress.EscapeIdentifier(kv2.Key.ToLower()));
 
                         if (referenceInfo.Contains(_thisTBname))
                         {
@@ -577,17 +706,24 @@ namespace MySqlConnector
             Export_WriteComment(string.Format("Dumping data for table {0}", tableName));
             Export_WriteComment(string.Empty);
             textWriter.WriteLine();
-            Export_WriteLine(string.Format("/*!40000 ALTER TABLE `{0}` DISABLE KEYS */;", tableName));
+            Export_WriteLine(string.Format("/*!40000 ALTER TABLE `{0}` DISABLE KEYS */;", QueryExpress.EscapeIdentifier(tableName)));
 
             if (ExportInfo.WrapWithinTransaction)
                 Export_WriteLine("START TRANSACTION;");
 
+            if (ExportInfo.EnableLockTablesWrite)
+                Export_WriteLine($"LOCK TABLES `{QueryExpress.EscapeIdentifier(tableName)}` WRITE;");
+
             Export_RowsData(tableName, selectSQL);
+
+            if (ExportInfo.EnableLockTablesWrite)
+                Export_WriteLine($"UNLOCK TABLES;");
 
             if (ExportInfo.WrapWithinTransaction)
                 Export_WriteLine("COMMIT;");
 
-            Export_WriteLine(string.Format("/*!40000 ALTER TABLE `{0}` ENABLE KEYS */;", tableName));
+            Export_WriteLine(string.Format("/*!40000 ALTER TABLE `{0}` ENABLE KEYS */;", QueryExpress.EscapeIdentifier(tableName)));
+
             textWriter.WriteLine();
             textWriter.Flush();
         }
@@ -657,7 +793,7 @@ namespace MySqlConnector
                     if (insertStatementHeader == null)
                     {
                         insertStatementHeader = Export_GetInsertStatementHeader(_mode, tableName, rdr);
-                        insertStatementHeaderByteLength = Export_EstimateByteCount(insertStatementHeader);
+                        insertStatementHeaderByteLength = QueryExpress.EstimateByteCount(insertStatementHeader, textEncoding);
                     }
 
                     // 3rd level temporary data cache
@@ -670,7 +806,7 @@ namespace MySqlConnector
 
                     // Calculate actual byte length of the value string
                     string valueString = sbValue.ToString();
-                    long sqlValueByteLength = Export_EstimateByteCount(valueString);
+                    long sqlValueByteLength = QueryExpress.EstimateByteCount(valueString, textEncoding);
 
                     // Calculate forecast byte length
                     long forecastSqlStatementByteLength = currentSqlByteLength + sqlValueByteLength + 1L; // +1 for comma or semicolon
@@ -739,30 +875,6 @@ namespace MySqlConnector
             }
 
             textWriter.Flush();
-        }
-
-        // Fast estimation for mostly ASCII content
-        long Export_EstimateByteCount(string str)
-        {
-            if (string.IsNullOrEmpty(str))
-                return 0;
-
-            // Quick check - if all ASCII, return length
-            bool isAscii = true;
-            foreach (char c in str)
-            {
-                if (c > 127)
-                {
-                    isAscii = false;
-                    break;
-                }
-            }
-
-            if (isAscii)
-                return str.Length;
-
-            // For non-ASCII, use actual calculation
-            return textEncoding.GetByteCount(str);
         }
 
         void Export_RowsData_OnDuplicateKeyUpdate(string tableName, string selectSQL)
@@ -873,7 +985,8 @@ namespace MySqlConnector
                     _sb.Clear();
 
                     _sb.Append("UPDATE `");
-                    _sb.Append(tableName);
+                    //_sb.Append(tableName);
+                    _sb.Append(QueryExpress.EscapeIdentifier(tableName));
                     _sb.Append("` SET ");
 
                     Export_GetUpdateString(rdr, table, _sb);
@@ -902,7 +1015,9 @@ namespace MySqlConnector
             else if (rowsExportMode == RowsDataExportMode.Replace)
                 sb.Append("REPLACE INTO `");
 
-            sb.Append(tableName);
+            //sb.Append(tableName);
+            sb.Append(QueryExpress.EscapeIdentifier(tableName));
+
             sb.Append("`(");
 
             for (int i = 0; i < rdr.FieldCount; i++)
@@ -915,7 +1030,10 @@ namespace MySqlConnector
                 if (i > 0)
                     sb.Append(",");
                 sb.Append("`");
-                sb.Append(rdr.GetName(i));
+
+                //sb.Append(rdr.GetName(i));
+                sb.Append(QueryExpress.EscapeIdentifier(rdr.GetName(i)));
+
                 sb.Append("`");
             }
 
@@ -953,7 +1071,7 @@ namespace MySqlConnector
                     ob = adjustFunc(ob);
                 }
 
-                Export_ConvertToSqlValueFormat(sb, ob, col, true, true);
+                QueryExpress.ConvertToSqlFormat(sb, ob, col, true, true);
             }
 
             sb.AppendFormat(")");
@@ -969,6 +1087,9 @@ namespace MySqlConnector
 
                 var col = table.Columns[columnName];
 
+                if (col.IsGeneratedColumn)
+                    continue;
+
                 if (!col.IsPrimaryKey)
                 {
                     if (isFirst)
@@ -977,7 +1098,10 @@ namespace MySqlConnector
                         sb.Append(",");
 
                     sb.Append("`");
-                    sb.Append(columnName);
+
+                    //sb.Append(columnName);
+                    sb.Append(QueryExpress.EscapeIdentifier(columnName));
+
                     sb.Append("`=");
 
                     var ob = rdr[i];
@@ -987,7 +1111,7 @@ namespace MySqlConnector
                         ob = adjustFunc(ob);
                     }
 
-                    Export_ConvertToSqlValueFormat(sb, ob, col, true, true);
+                    QueryExpress.ConvertToSqlFormat(sb, ob, col, true, true);
                 }
             }
         }
@@ -1010,7 +1134,10 @@ namespace MySqlConnector
                         sb.Append(" and ");
 
                     sb.Append("`");
-                    sb.Append(columnName);
+
+                    //sb.Append(columnName);
+                    sb.Append(QueryExpress.EscapeIdentifier(columnName));
+
                     sb.Append("`=");
 
                     var ob = rdr[i];
@@ -1020,228 +1147,7 @@ namespace MySqlConnector
                         ob = adjustFunc(ob);
                     }
 
-                    Export_ConvertToSqlValueFormat(sb, ob, col, true, true);
-                }
-            }
-        }
-
-        void Export_ConvertToSqlValueFormat(StringBuilder sb, Object ob, MySqlColumn col, bool escapeStringSequence, bool wrapStringWithSingleQuote)
-        {
-            if (ob == null || ob is System.DBNull)
-            {
-                sb.AppendFormat("NULL");
-            }
-            else if (ob is System.String)
-            {
-                string str = (string)ob;
-
-                if (escapeStringSequence)
-                    str = QueryExpress.EscapeStringSequence(str);
-
-                if (wrapStringWithSingleQuote)
-                    sb.AppendFormat("'");
-
-                sb.Append(str);
-
-                if (wrapStringWithSingleQuote)
-                    sb.AppendFormat("'");
-            }
-            else if (ob is System.Boolean)
-            {
-                sb.AppendFormat(Convert.ToInt32(ob).ToString());
-            }
-            else if (ob is System.Byte[])
-            {
-                Export_ConvertByteArrayToHexString(sb, ob);
-            }
-            else if (ob is short)
-            {
-                sb.AppendFormat(((short)ob).ToString(QueryExpress._numberFormatInfo));
-            }
-            else if (ob is int)
-            {
-                sb.AppendFormat(((int)ob).ToString(QueryExpress._numberFormatInfo));
-            }
-            else if (ob is long)
-            {
-                sb.AppendFormat(((long)ob).ToString(QueryExpress._numberFormatInfo));
-            }
-            else if (ob is ushort)
-            {
-                sb.AppendFormat(((ushort)ob).ToString(QueryExpress._numberFormatInfo));
-            }
-            else if (ob is uint)
-            {
-                sb.AppendFormat(((uint)ob).ToString(QueryExpress._numberFormatInfo));
-            }
-            else if (ob is ulong)
-            {
-                sb.AppendFormat(((ulong)ob).ToString(QueryExpress._numberFormatInfo));
-            }
-            else if (ob is double)
-            {
-                sb.AppendFormat(((double)ob).ToString(QueryExpress._numberFormatInfo));
-            }
-            else if (ob is decimal)
-            {
-                sb.AppendFormat(((decimal)ob).ToString(QueryExpress._numberFormatInfo));
-            }
-            else if (ob is float)
-            {
-                sb.AppendFormat(((float)ob).ToString(QueryExpress._numberFormatInfo));
-            }
-            else if (ob is byte)
-            {
-                sb.AppendFormat(((byte)ob).ToString(QueryExpress._numberFormatInfo));
-            }
-            else if (ob is sbyte)
-            {
-                sb.AppendFormat(((sbyte)ob).ToString(QueryExpress._numberFormatInfo));
-            }
-            else if (ob is TimeSpan)
-            {
-                TimeSpan ts = (TimeSpan)ob;
-
-                if (wrapStringWithSingleQuote)
-                    sb.AppendFormat("'");
-
-                sb.AppendFormat(((int)ts.TotalHours).ToString().PadLeft(2, '0'));
-                sb.AppendFormat(":");
-                sb.AppendFormat(ts.Duration().Minutes.ToString().PadLeft(2, '0'));
-                sb.AppendFormat(":");
-                sb.AppendFormat(ts.Duration().Seconds.ToString().PadLeft(2, '0'));
-
-                if (wrapStringWithSingleQuote)
-                    sb.AppendFormat("'");
-
-            }
-            else if (ob is System.DateTime)
-            {
-                if (wrapStringWithSingleQuote)
-                    sb.AppendFormat("'");
-
-                sb.AppendFormat(((DateTime)ob).ToString("yyyy-MM-dd HH:mm:ss", QueryExpress._dateFormatInfo));
-
-                if (col.TimeFractionLength > 0)
-                {
-                    sb.Append(".");
-                    string _microsecond = ((DateTime)ob).ToString("".PadLeft(col.TimeFractionLength, 'f'));
-                    sb.Append(_microsecond);
-                }
-
-                if (wrapStringWithSingleQuote)
-                    sb.AppendFormat("'");
-            }
-            else if (ob is MySqlDateTime mdt)
-            {
-                if (mdt.IsValidDateTime)
-                {
-                    DateTime dtime = mdt.GetDateTime();
-
-                    if (wrapStringWithSingleQuote)
-                        sb.AppendFormat("'");
-
-                    if (col.MySqlDataType == "datetime")
-                        sb.AppendFormat(dtime.ToString("yyyy-MM-dd HH:mm:ss", QueryExpress._dateFormatInfo));
-                    else if (col.MySqlDataType == "date")
-                        sb.AppendFormat(dtime.ToString("yyyy-MM-dd", QueryExpress._dateFormatInfo));
-                    else if (col.MySqlDataType == "time")
-                        sb.AppendFormat("{0}:{1}:{2}", mdt.Hour, mdt.Minute, mdt.Second);
-                    else
-                        sb.AppendFormat(dtime.ToString("yyyy-MM-dd HH:mm:ss", QueryExpress._dateFormatInfo));
-
-                    if (col.TimeFractionLength > 0)
-                    {
-                        sb.Append(".");
-                        sb.Append(((MySqlDateTime)ob).Microsecond.ToString().PadLeft(col.TimeFractionLength, '0'));
-                    }
-
-                    if (wrapStringWithSingleQuote)
-                        sb.AppendFormat("'");
-                }
-                else
-                {
-                    if (wrapStringWithSingleQuote)
-                        sb.AppendFormat("'");
-
-                    if (col.MySqlDataType == "datetime")
-                        sb.AppendFormat("0000-00-00 00:00:00");
-                    else if (col.MySqlDataType == "date")
-                        sb.AppendFormat("0000-00-00");
-                    else if (col.MySqlDataType == "time")
-                        sb.AppendFormat("00:00:00");
-                    else
-                        sb.AppendFormat("0000-00-00 00:00:00");
-
-                    if (col.TimeFractionLength > 0)
-                    {
-                        sb.Append(".".PadRight(col.TimeFractionLength, '0'));
-                    }
-
-                    if (wrapStringWithSingleQuote)
-                        sb.AppendFormat("'");
-                }
-            }
-            else if (ob is System.Guid)
-            {
-                if (col.MySqlDataType == "binary(16)")
-                {
-                    Export_ConvertByteArrayToHexString(sb, ob);
-                }
-                else if (col.MySqlDataType == "char(36)")
-                {
-                    if (wrapStringWithSingleQuote)
-                        sb.AppendFormat("'");
-
-                    sb.Append(ob);
-
-                    if (wrapStringWithSingleQuote)
-                        sb.AppendFormat("'");
-                }
-                else
-                {
-                    if (wrapStringWithSingleQuote)
-                        sb.AppendFormat("'");
-
-                    sb.Append(ob);
-
-                    if (wrapStringWithSingleQuote)
-                        sb.AppendFormat("'");
-                }
-            }
-            else
-            {
-                throw new Exception("Unhandled data type. Current processing data type: " + ob.GetType().ToString() + ". Please report this bug with this message to the development team.");
-            }
-        }
-
-        void Export_ConvertByteArrayToHexString(StringBuilder sb, object ob)
-        {
-            if (ob == null || ob == DBNull.Value)
-            {
-                sb.Append("NULL");
-            }
-            else
-            {
-                byte[] ba = (byte[])ob;
-                if (ba.Length == 0)
-                {
-                    sb.Append("''");
-                }
-                else
-                {
-                    char[] c = new char[ba.Length * 2 + 2];
-                    byte b;
-                    c[0] = '0';
-                    c[1] = 'x';
-                    for (int y = 0, x = 2; y < ba.Length; ++y, ++x)
-                    {
-                        b = ((byte)(ba[y] >> 4));
-                        c[x] = (char)(b > 9 ? b + 0x37 : b + 0x30);
-                        b = ((byte)(ba[y] & 0xF));
-                        c[++x] = (char)(b > 9 ? b + 0x37 : b + 0x30);
-                    }
-                    sb.Append(new string(c));
+                    QueryExpress.ConvertToSqlFormat(sb, ob, col, true, true);
                 }
             }
         }
@@ -1265,7 +1171,9 @@ namespace MySqlConnector
                     procedure.CreateProcedureSQL.Trim().Length == 0)
                     continue;
 
-                Export_WriteLine(string.Format("DROP PROCEDURE IF EXISTS `{0}`;", procedure.Name));
+                //Export_WriteLine(string.Format("DROP PROCEDURE IF EXISTS `{0}`;", procedure.Name));
+                Export_WriteLine(string.Format("DROP PROCEDURE IF EXISTS `{0}`;", QueryExpress.EscapeIdentifier(procedure.Name)));
+
                 Export_WriteLine("DELIMITER " + ExportInfo.ScriptsDelimiter);
 
                 if (ExportInfo.ExportRoutinesWithoutDefiner)
@@ -1298,7 +1206,9 @@ namespace MySqlConnector
                     function.CreateFunctionSQLWithoutDefiner.Trim().Length == 0)
                     continue;
 
-                Export_WriteLine(string.Format("DROP FUNCTION IF EXISTS `{0}`;", function.Name));
+                //Export_WriteLine(string.Format("DROP FUNCTION IF EXISTS `{0}`;", function.Name));
+                Export_WriteLine(string.Format("DROP FUNCTION IF EXISTS `{0}`;", QueryExpress.EscapeIdentifier(function.Name)));
+
                 Export_WriteLine("DELIMITER " + ExportInfo.ScriptsDelimiter);
 
                 if (ExportInfo.ExportRoutinesWithoutDefiner)
@@ -1343,8 +1253,11 @@ namespace MySqlConnector
                     view.CreateViewSQLWithoutDefiner.Trim().Length == 0)
                     continue;
 
-                Export_WriteLine(string.Format("DROP TABLE IF EXISTS `{0}`;", view.Name));
-                Export_WriteLine(string.Format("DROP VIEW IF EXISTS `{0}`;", view.Name));
+                //Export_WriteLine(string.Format("DROP TABLE IF EXISTS `{0}`;", view.Name));
+                //Export_WriteLine(string.Format("DROP VIEW IF EXISTS `{0}`;", view.Name));
+
+                Export_WriteLine(string.Format("DROP TABLE IF EXISTS `{0}`;", QueryExpress.EscapeIdentifier(view.Name)));
+                Export_WriteLine(string.Format("DROP VIEW IF EXISTS `{0}`;", QueryExpress.EscapeIdentifier(view.Name)));
 
                 if (ExportInfo.ExportRoutinesWithoutDefiner)
                     Export_WriteLine(view.CreateViewSQLWithoutDefiner);
@@ -1377,7 +1290,9 @@ namespace MySqlConnector
                     e.CreateEventSqlWithoutDefiner.Trim().Length == 0)
                     continue;
 
-                Export_WriteLine(string.Format("DROP EVENT IF EXISTS `{0}`;", e.Name));
+                //Export_WriteLine(string.Format("DROP EVENT IF EXISTS `{0}`;", e.Name));
+                Export_WriteLine(string.Format("DROP EVENT IF EXISTS `{0}`;", QueryExpress.EscapeIdentifier(e.Name)));
+
                 Export_WriteLine("DELIMITER " + ExportInfo.ScriptsDelimiter);
 
                 if (ExportInfo.ExportRoutinesWithoutDefiner)
@@ -1414,7 +1329,9 @@ namespace MySqlConnector
                     createTriggerSQLWithoutDefiner.Length == 0)
                     continue;
 
-                Export_WriteLine(string.Format("DROP TRIGGER /*!50030 IF EXISTS */ `{0}`;", trigger.Name));
+                //Export_WriteLine(string.Format("DROP TRIGGER /*!50030 IF EXISTS */ `{0}`;", trigger.Name));
+                Export_WriteLine(string.Format("DROP TRIGGER /*!50030 IF EXISTS */ `{0}`;", QueryExpress.EscapeIdentifier(trigger.Name)));
+
                 Export_WriteLine("DELIMITER " + ExportInfo.ScriptsDelimiter);
 
                 if (ExportInfo.ExportRoutinesWithoutDefiner)
@@ -1468,68 +1385,242 @@ namespace MySqlConnector
             textWriter.WriteLine(text);
         }
 
+        void Export_RaiseCompletionEvent()
+        {
+            if (ExportCompleted != null)
+            {
+                ExportCompleteArgs arg = new ExportCompleteArgs(timeStart, timeEnd, processCompletionType, _lastError);
+                ExportCompleted(this, arg);
+            }
+        }
+
+        void Export_RestoreOriginalVariables()
+        {
+            try
+            {
+                Command.CommandText = $"SET @@session.time_zone= '{_originalTimeZone}';";
+                Command.ExecuteNonQuery();
+            }
+            catch { }
+        }
+
         #endregion
 
         #region Import
 
         public void ImportFromString(string sqldumptext)
         {
-            using (MemoryStream ms = new MemoryStream())
+            try
             {
-                using (StreamWriter thisWriter = new StreamWriter(ms))
+                textReader = null;
+                useStreamReader = true;
+
+                using (MemoryStream ms = new MemoryStream())
                 {
-                    thisWriter.Write(sqldumptext);
-                    thisWriter.Flush();
+                    using (StreamWriter thisWriter = new StreamWriter(ms))
+                    {
+                        thisWriter.Write(sqldumptext);
+                        thisWriter.Flush();
 
-                    ms.Position = 0L;
+                        ms.Position = 0L;
 
-                    ImportFromMemoryStream(ms);
+                        if (_calculateBytes)
+                            _totalBytes = ms.Length;
+
+                        using (var sr = new StreamReader(ms))
+                        {
+                            streamReader = sr;
+                            canSeekStreamPosition = streamReader.BaseStream.CanSeek;
+                            Import_Start();
+                        }
+                    }
                 }
+
+                Import_RaiseCompletionEvent();
+            }
+            catch (Exception ex)
+            {
+                _lastError = ex;
+                Import_RaiseCompletionEvent();
+                throw;
             }
         }
 
         public void ImportFromFile(string filePath)
         {
-            System.IO.FileInfo fi = new FileInfo(filePath);
-
-            using (TextReader tr = new StreamReader(filePath))
+            try
             {
-                ImportFromTextReaderStream(tr, fi);
+                textReader = null;
+                useStreamReader = true;
+
+                if (_calculateBytes)
+                {
+                    System.IO.FileInfo fi = new FileInfo(filePath);
+                    _totalBytes = fi.Length;
+                }
+
+                using (var sr = new StreamReader(filePath))
+                {
+                    streamReader = sr;
+                    canSeekStreamPosition = streamReader.BaseStream.CanSeek;
+                    Import_Start();
+                }
+
+                Import_RaiseCompletionEvent();
+            }
+            catch (Exception ex)
+            {
+                _lastError = ex;
+                Import_RaiseCompletionEvent();
+                throw;
+            }
+        }
+
+        public void ImportFromMemoryStream(MemoryStream ms)
+        {
+            ImportFromMemoryStream(ms, 0L);
+        }
+
+        public void ImportFromMemoryStream(MemoryStream ms, long bytesTotal)
+        {
+            try
+            {
+                if (ms == null)
+                    throw new ArgumentNullException(nameof(ms), "MemoryStream cannot be null.");
+
+                if (_calculateBytes)
+                {
+                    if (bytesTotal < 0L)
+                        throw new ArgumentException("Total bytes cannot be negative.", nameof(bytesTotal));
+                }
+
+                if (ms.Length == 0)
+                    throw new ArgumentException("MemoryStream is empty.", nameof(ms));
+
+                textReader = null;
+                useStreamReader = true;
+
+                ms.Position = 0;
+
+                if (_calculateBytes)
+                {
+                    if (bytesTotal > 0L)
+                    {
+                        _totalBytes = bytesTotal;
+                    }
+                    else
+                    {
+                        _totalBytes = ms.Length;
+                    }
+                }
+
+                using (var sr = new StreamReader(ms))
+                {
+                    streamReader = sr;
+                    canSeekStreamPosition = streamReader.BaseStream.CanSeek;
+                    Import_Start();
+                }
+
+                Import_RaiseCompletionEvent();
+            }
+            catch (Exception ex)
+            {
+                _lastError = ex;
+                Import_RaiseCompletionEvent();
+                throw;
+            }
+        }
+
+        public void ImportFromStream(Stream sm)
+        {
+            ImportFromStream(sm, 0L);
+        }
+
+        public void ImportFromStream(Stream sm, long bytesTotal)
+        {
+            try
+            {
+                if (sm == null)
+                    throw new ArgumentNullException(nameof(sm), "Stream cannot be null.");
+
+                if (bytesTotal < 0L)
+                    throw new ArgumentException("Total bytes cannot be negative.", nameof(bytesTotal));
+
+                if (sm.CanSeek)
+                {
+                    if (sm.Length == 0)
+                        throw new ArgumentException("Stream is empty.", nameof(sm));
+
+                    sm.Seek(0, SeekOrigin.Begin);
+
+                    if (_calculateBytes && bytesTotal == 0L)
+                    {
+                        _totalBytes = sm.Length;
+                    }
+                }
+
+                if (bytesTotal > 0L)
+                {
+                    _totalBytes = bytesTotal;
+                }
+
+                textReader = null;
+                useStreamReader = true;
+
+                using (var sr = new StreamReader(sm))
+                {
+                    streamReader = sr;
+                    canSeekStreamPosition = streamReader.BaseStream.CanSeek;
+                    Import_Start();
+                }
+
+                Import_RaiseCompletionEvent();
+            }
+            catch (Exception ex)
+            {
+                _lastError = ex;
+                Import_RaiseCompletionEvent();
+                throw;
             }
         }
 
         public void ImportFromTextReader(TextReader tr)
         {
-            ImportFromTextReaderStream(tr, null);
+            ImportFromTextReader(tr, 0L);
         }
 
-        public void ImportFromMemoryStream(MemoryStream ms)
+        public void ImportFromTextReader(TextReader tr, long bytesTotal)
         {
-            ms.Position = 0;
-            _totalBytes = ms.Length;
-            textReader = new StreamReader(ms);
-            Import_Start();
-        }
+            try
+            {
+                if (tr == null)
+                    throw new ArgumentNullException(nameof(tr), "TextReader cannot be null.");
 
-        public void ImportFromStream(Stream sm)
-        {
-            if (sm.CanSeek)
-                sm.Seek(0, SeekOrigin.Begin);
+                if (_calculateBytes)
+                {
+                    if (bytesTotal < 0L)
+                        throw new ArgumentException("Total bytes cannot be negative.", nameof(bytesTotal));
 
-            textReader = new StreamReader(sm);
-            Import_Start();
-        }
+                    if (bytesTotal > 0L)
+                        _totalBytes = bytesTotal;
+                }
 
-        void ImportFromTextReaderStream(TextReader tr, FileInfo fileInfo)
-        {
-            if (fileInfo != null)
-                _totalBytes = fileInfo.Length;
-            else
-                _totalBytes = 0L;
+                useStreamReader = false;
+                streamReader = null;
+                canSeekStreamPosition = false;
 
-            textReader = tr;
+                textReader = tr;
 
-            Import_Start();
+                Import_Start();
+
+                Import_RaiseCompletionEvent();
+            }
+            catch (Exception ex)
+            {
+                _lastError = ex;
+                Import_RaiseCompletionEvent();
+                throw;
+            }
         }
 
         void Import_Start()
@@ -1550,7 +1641,10 @@ namespace MySqlConnector
 
                     try
                     {
-                        line = Import_GetLine();
+                        if (useStreamReader)
+                            line = Import_GetLineStreamReader();
+                        else
+                            line = Import_GetLineTextReader();
 
                         if (line == null)
                             break;
@@ -1613,19 +1707,60 @@ namespace MySqlConnector
             _lastError = null;
             timeStart = DateTime.Now;
             _currentBytes = 0L;
+            textEncoding = ImportInfo.TextEncoding;
             _sb = new StringBuilder(_initialMaxStringBuilderCapacity);
-            _mySqlScript = new MySqlScript(Command.Connection);
+
             currentProcess = ProcessType.Import;
             processCompletionType = ProcessEndType.Complete;
             _delimiter = ";";
             _lastErrorSql = string.Empty;
+
+            _calculateBytes = ImportProgressChanged != null;
 
             if (ImportProgressChanged != null)
                 timerReport.Start();
 
         }
 
-        string Import_GetLine()
+        string Import_GetLineStreamReader()
+        {
+            long startPosition = 0L;
+
+            // Capture starting position for seekable streams
+            if (canSeekStreamPosition)
+            {
+                startPosition = streamReader.BaseStream.Position;
+            }
+
+            string line = streamReader.ReadLine();
+            if (line == null)
+                return null;
+
+            // Calculate bytes read when progress reporting is enabled
+            if (ImportProgressChanged != null)
+            {
+                if (canSeekStreamPosition)
+                {
+                    // Use stream position for seekable streams
+                    long endPosition = streamReader.BaseStream.Position;
+                    _currentBytes += (endPosition - startPosition);
+                }
+                else
+                {
+                    // Hybrid approach for non-seekable streams
+                    string lineWithTerminator = line + Environment.NewLine;
+                    _currentBytes += QueryExpress.EstimateByteCount(lineWithTerminator, textEncoding);
+                }
+            }
+
+            line = line.Trim();
+            if (Import_IsEmptyLine(line))
+                return string.Empty;
+
+            return line;
+        }
+
+        string Import_GetLineTextReader()
         {
             string line = textReader.ReadLine();
 
@@ -1634,7 +1769,8 @@ namespace MySqlConnector
 
             if (ImportProgressChanged != null)
             {
-                _currentBytes = _currentBytes + (long)line.Length;
+                string lineWithTerminator = line + Environment.NewLine;
+                _currentBytes += QueryExpress.EstimateByteCount(lineWithTerminator, textEncoding);
             }
 
             line = line.Trim();
@@ -1660,7 +1796,6 @@ namespace MySqlConnector
                     break;
                 case NextImportAction.ChangeDelimiter:
                     Import_ChangeDelimiter(line);
-                    Import_AppendLine(line);
                     break;
                 case NextImportAction.AppendLineAndExecute:
                     Import_AppendLineAndExecute(line);
@@ -1704,17 +1839,27 @@ namespace MySqlConnector
 
             string _query = _sb.ToString();
 
-            if (_query.StartsWith("DELIMITER ", StringComparison.OrdinalIgnoreCase))
+            if (_delimiter != ";")
             {
-                _mySqlScript.Query = _sb.ToString();
-                _mySqlScript.Delimiter = _delimiter;
-                _mySqlScript.Execute();
+                string trimmed = _query.TrimEnd();
+                int lastIndex = trimmed.LastIndexOf(_delimiter);
+                _query = lastIndex != -1 ? trimmed.Remove(lastIndex, _delimiter.Length) : trimmed;
             }
-            else
-            {
-                Command.CommandText = _query;
-                Command.ExecuteNonQuery();
-            }
+
+            Command.CommandText = _query;
+            Command.ExecuteNonQuery();
+
+            //if (_delimiter != ";")
+            //{
+            //    _mySqlScript.Query = $"DELIMITER {_delimiter}{Environment.NewLine}{_query}";
+            //    _mySqlScript.Delimiter = _delimiter;
+            //    _mySqlScript.Execute();
+            //}
+            //else
+            //{
+            //    Command.CommandText = _query;
+            //    Command.ExecuteNonQuery();
+            //}
 
             _sb.Clear();
 
@@ -1743,6 +1888,30 @@ namespace MySqlConnector
             return false;
         }
 
+        void Import_RaiseCompletionEvent()
+        {
+            if (ImportCompleted != null)
+            {
+                MySqlBackup.ProcessEndType completedType = ProcessEndType.UnknownStatus;
+
+                switch (processCompletionType)
+                {
+                    case ProcessEndType.Complete:
+                        completedType = MySqlBackup.ProcessEndType.Complete;
+                        break;
+                    case ProcessEndType.Error:
+                        completedType = MySqlBackup.ProcessEndType.Error;
+                        break;
+                    case ProcessEndType.Cancelled:
+                        completedType = MySqlBackup.ProcessEndType.Cancelled;
+                        break;
+                }
+
+                ImportCompleteArgs arg = new ImportCompleteArgs(completedType, timeStart, timeEnd, _lastError);
+                ImportCompleted(this, arg);
+            }
+        }
+
         #endregion
 
         void ReportEndProcess()
@@ -1754,36 +1923,12 @@ namespace MySqlConnector
             if (currentProcess == ProcessType.Export)
             {
                 ReportProgress();
-                if (ExportCompleted != null)
-                {
-                    ExportCompleteArgs arg = new ExportCompleteArgs(timeStart, timeEnd, processCompletionType, _lastError);
-                    ExportCompleted(this, arg);
-                }
             }
             else if (currentProcess == ProcessType.Import)
             {
                 _currentBytes = _totalBytes;
 
                 ReportProgress();
-                if (ImportCompleted != null)
-                {
-                    MySqlBackup.ProcessEndType completedType = ProcessEndType.UnknownStatus;
-                    switch (processCompletionType)
-                    {
-                        case ProcessEndType.Complete:
-                            completedType = MySqlBackup.ProcessEndType.Complete;
-                            break;
-                        case ProcessEndType.Error:
-                            completedType = MySqlBackup.ProcessEndType.Error;
-                            break;
-                        case ProcessEndType.Cancelled:
-                            completedType = MySqlBackup.ProcessEndType.Cancelled;
-                            break;
-                    }
-
-                    ImportCompleteArgs arg = new ImportCompleteArgs(completedType, timeStart, timeEnd, _lastError);
-                    ImportCompleted(this, arg);
-                }
             }
         }
 
@@ -1822,21 +1967,25 @@ namespace MySqlConnector
         public void Dispose()
         {
             StopAllProcess();
-            timerReport?.Stop();
-            timerReport?.Dispose();
-            timerReport = null;
-            textWriter?.Dispose();
-            textWriter = null;
-            textReader?.Dispose();
-            textReader = null;
-            _database?.Dispose();
-            _database = null;
-            _server = null;
-            _mySqlScript = null;
-            _currentTableColumnValueAdjustment = null;
-            _sb = null;
-            _lastError = null;
-            //GC.SuppressFinalize(this);
+
+            if (timerReport != null)
+            {
+                timerReport.Stop();
+                timerReport.Dispose();
+                timerReport = null;
+            }
+
+            if (textWriter != null)
+            {
+                textWriter.Dispose();
+                textWriter = null;
+            }
+
+            if (textReader != null)
+            {
+                textReader.Dispose();
+                textReader = null;
+            }
         }
     }
 }

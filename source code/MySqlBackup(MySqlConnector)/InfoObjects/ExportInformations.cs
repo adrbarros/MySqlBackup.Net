@@ -66,15 +66,19 @@ namespace MySqlConnector
         {
             if (_documentHeaders == null)
             {
-                _documentHeaders = new List<string>();
-                string databaseCharSet = QueryExpress.ExecuteScalarStr(cmd, "SHOW variables LIKE 'character_set_database';", 1);
+                string databaseCharSet = QueryExpress.ExecuteScalarStr(cmd, "SHOW VARIABLES LIKE 'character_set_database';", 1);
+                if (string.IsNullOrEmpty(databaseCharSet))
+                {
+                    databaseCharSet = "utf8mb4"; // Default to modern Unicode character set
+                }
 
+                _documentHeaders = new List<string>();
                 _documentHeaders.Add("/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;");
                 _documentHeaders.Add("/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;");
                 _documentHeaders.Add("/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;");
-                _documentHeaders.Add(string.Format("/*!40101 SET NAMES {0} */;", databaseCharSet));
-                //_documentHeaders.Add("/*!40103 SET @OLD_TIME_ZONE=@@TIME_ZONE */;");
-                //_documentHeaders.Add("/*!40103 SET TIME_ZONE='+00:00' */;");
+                _documentHeaders.Add($"/*!40101 SET NAMES {databaseCharSet} */;");
+                _documentHeaders.Add("/*!40103 SET @OLD_TIME_ZONE=@@TIME_ZONE */;");
+                _documentHeaders.Add("/*!40103 SET TIME_ZONE='+00:00' */;");
                 _documentHeaders.Add("/*!40014 SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0 */;");
                 _documentHeaders.Add("/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;");
                 _documentHeaders.Add("/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;");
@@ -102,41 +106,17 @@ namespace MySqlConnector
             if (_documentFooters == null)
             {
                 _documentFooters = new List<string>();
-
-                // Restore unique checks to original state
-                _documentFooters.Add("/*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;");
-                // Restore foreign key checks to original state
-                _documentFooters.Add("/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;");
-                // Restore character set for client to original state
-                _documentFooters.Add("/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;");
-                // Restore character set for results to original state
-                _documentFooters.Add("/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;");
-                // Restore collation to original state
-                _documentFooters.Add("/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;");
-                // Restore time zone to original state
                 _documentFooters.Add("/*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;");
-                // Restore SQL mode to original state
                 _documentFooters.Add("/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;");
-                // Restore SQL notes to original state
+                _documentFooters.Add("/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;");
+                _documentFooters.Add("/*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;");
+                _documentFooters.Add("/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;");
+                _documentFooters.Add("/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;");
+                _documentFooters.Add("/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;");
                 _documentFooters.Add("/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;");
             }
 
             return _documentFooters;
-
-            //if (_documentFooters == null)
-            //{
-            //    _documentFooters = new List<string>();
-            //    //_documentFooters.Add("/*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;");
-            //    _documentFooters.Add("/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;");
-            //    _documentFooters.Add("/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;");
-            //    _documentFooters.Add("/*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;");
-            //    _documentFooters.Add("/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;");
-            //    _documentFooters.Add("/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;");
-            //    _documentFooters.Add("/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;");
-            //    _documentFooters.Add("/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;");
-            //}
-
-            //return _documentFooters;
         }
 
         /// <summary>
@@ -190,7 +170,7 @@ namespace MySqlConnector
         /// <summary>
         /// Gets or Sets a value indicates whether the Dump Time should recorded in dump file.
         /// </summary>
-        public bool RecordDumpTime = true;
+        public bool RecordDumpTime { get; set; } = true;
 
         /// <summary>
         /// Gets or Sets a value indicates whether the SQL statement of "CREATE DATABASE" should be added into dump file.
@@ -271,11 +251,6 @@ namespace MySqlConnector
         public int IntervalForProgressReport { get { if (_interval == 0) return 100; return _interval; } set { _interval = value; } }
 
         /// <summary>
-        /// Gets or Sets a value indicates whether the totals of rows should be counted before export process commence. The value of total rows is used for progress reporting. Extra time is needed to get the total rows. Sets this value to FALSE if not applying progress reporting.
-        /// </summary>
-        //public bool GetTotalRowsBeforeExport = true;
-
-        /// <summary>
         /// Gets or Sets the delimiter used for exporting Procedures, Functions, Events and Triggers. Default delimiter is "|".
         /// </summary>
         public string ScriptsDelimiter { get { if (string.IsNullOrEmpty(_delimiter)) return "|"; return _delimiter; } set { _delimiter = value; } }
@@ -294,6 +269,12 @@ namespace MySqlConnector
         /// Gets or Sets a value indicates whether the rows dump should be wrapped with transaction. Recommended to set this value to FALSE if using RowsExportMode = "INSERT" or "INSERTIGNORE" or "REPLACE", else TRUE.
         /// </summary>
         public bool WrapWithinTransaction { get; set; } = false;
+
+        /// <summary>
+        /// Gets or sets a value indicating whether to use LOCK TABLES WRITE during export operations.
+        /// When enabled, tables are locked for writing to ensure data consistency but may block other operations.
+        /// </summary>
+        public bool EnableLockTablesWrite { get; set; } = false;
 
         /// <summary>
         /// Gets or Sets a value indicates the encoding to be used for exporting the dump. Default = UTF8Coding(false)
@@ -330,7 +311,7 @@ namespace MySqlConnector
         /// <summary>
         /// Helper method to add column adjustment
         /// </summary>
-        public void SetTableColumnValueAdjustment(string tableName, string columnName, Func<object, object> adjustFunc)
+        public void AddTableColumnValueAdjustment(string tableName, string columnName, Func<object, object> adjustFunc)
         {
             if (_columnAdjustments == null)
                 _columnAdjustments = new Dictionary<string, Dictionary<string, Func<object, object>>>(StringComparer.OrdinalIgnoreCase);
