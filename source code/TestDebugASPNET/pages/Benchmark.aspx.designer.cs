@@ -11,79 +11,88 @@ namespace System.pages
 {
 
 
-    public partial class QueryBrowser
+    public partial class Benchmark
     {
 
         /// <summary>
-        /// btSelectExecute control.
+        /// panelSetup control.
         /// </summary>
         /// <remarks>
         /// Auto-generated field.
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
-        protected global::System.Web.UI.WebControls.Button btSelectExecute;
+        protected global::System.Web.UI.WebControls.Panel panelSetup;
 
         /// <summary>
-        /// btSelectShow control.
+        /// txtInitialSchema control.
         /// </summary>
         /// <remarks>
         /// Auto-generated field.
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
-        protected global::System.Web.UI.WebControls.Button btSelectShow;
+        protected global::System.Web.UI.WebControls.TextBox txtInitialSchema;
 
         /// <summary>
-        /// btExecute control.
+        /// txtFilePathMySqlDump control.
         /// </summary>
         /// <remarks>
         /// Auto-generated field.
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
-        protected global::System.Web.UI.WebControls.Button btExecute;
+        protected global::System.Web.UI.WebControls.TextBox txtFilePathMySqlDump;
 
         /// <summary>
-        /// btShowAllTables control.
+        /// txtFilePathMySql control.
         /// </summary>
         /// <remarks>
         /// Auto-generated field.
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
-        protected global::System.Web.UI.WebControls.Button btShowAllTables;
+        protected global::System.Web.UI.WebControls.TextBox txtFilePathMySql;
 
         /// <summary>
-        /// txtMaxRows control.
+        /// btRun control.
         /// </summary>
         /// <remarks>
         /// Auto-generated field.
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
-        protected global::System.Web.UI.WebControls.TextBox txtMaxRows;
+        protected global::System.Web.UI.WebControls.Button btRun;
 
         /// <summary>
-        /// txtMaxTextValueLength control.
+        /// cbNoTryCatch control.
         /// </summary>
         /// <remarks>
         /// Auto-generated field.
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
-        protected global::System.Web.UI.WebControls.TextBox txtMaxTextValueLength;
+        protected global::System.Web.UI.WebControls.CheckBox cbNoTryCatch;
 
         /// <summary>
-        /// txtSql control.
+        /// cbCleanDatabaseAfterUse control.
         /// </summary>
         /// <remarks>
         /// Auto-generated field.
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
-        protected global::System.Web.UI.WebControls.TextBox txtSql;
+        protected global::System.Web.UI.WebControls.CheckBox cbCleanDatabaseAfterUse;
 
         /// <summary>
-        /// phResult control.
+        /// panelResult control.
         /// </summary>
         /// <remarks>
         /// Auto-generated field.
         /// To modify move field declaration from designer file to code-behind file.
         /// </remarks>
-        protected global::System.Web.UI.WebControls.PlaceHolder phResult;
+        protected global::System.Web.UI.WebControls.Panel panelResult;
+
+        /// <summary>
+        /// literalTaskId control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.Literal literalTaskId;
     }
 }
