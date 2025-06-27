@@ -2,13 +2,9 @@
 
 <asp:Content ID="Content1" ContentPlaceHolderID="head" runat="server">
     <style>
-        #div-benchmark-report {
-            margin-top: 20px;
-            max-width: 1000px;
-            background-color: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        
+        .maintb tr td:first-child {
+            text-align: right;
         }
 
         .progress-container {
@@ -234,16 +230,16 @@
 </asp:Content>
 <asp:Content ID="Content2" ContentPlaceHolderID="ContentPlaceHolder1" runat="server">
 
-    <div class="main-content">
-
-        <h1>Benchmark</h1>
-
+    <div class="div-center-framed-content">
         <asp:Panel ID="panelSetup" runat="server">
+
+            <h1>Benchmark</h1>
+
             Performance test and comparison of Backup and Restore of using MySqlBackup.NET, MySqlDump and MySql (instance).<br />
             The test requires this ASP.NET application to be run with "LocalSystem" / "System" / "Administrator" privilege.<br />
             <br />
             Please manually enter the file path of the following instance:
-            <table>
+            <table class="maintb">
                 <tr>
                     <td style="padding-top: 10px; padding-bottom: 0; vertical-align: top;">Initial Schema</td>
                     <td>
@@ -252,29 +248,98 @@
                     </td>
                 </tr>
                 <tr>
-                    <td>MySqlDump</td>
+                    <td style="padding-top: 10px; padding-bottom: 0; vertical-align: top;">MySqlDump</td>
                     <td>
-                        <asp:TextBox ID="txtFilePathMySqlDump" runat="server" Width="600px"></asp:TextBox>
+                        <asp:TextBox ID="txtFilePathMySqlDump" runat="server" Width="600px"></asp:TextBox><br />
+                        *The executable file path of mysqldump.exe
                     </td>
                 </tr>
                 <tr>
-                    <td>MySql</td>
+                    <td style="padding-top: 10px; padding-bottom: 0; vertical-align: top;">MySql</td>
                     <td>
-                        <asp:TextBox ID="txtFilePathMySql" runat="server" Width="600px"></asp:TextBox>
+                        <asp:TextBox ID="txtFilePathMySql" runat="server" Width="600px"></asp:TextBox><br />
+                        *The executable file path of mysql.exe
                     </td>
+                </tr>
+                <tr>
+                    <td></td>
+                    <td>
+                        <div style="border: 1px solid #71c668;">
+
+                            <div style="border-bottom: 1px solid #71c668; padding: 10px; background: #ecf6ff;">
+                                Select mysql.exe Instance Execution Method:
+                            </div>
+
+                            <div style="padding: 10px;">
+                                <asp:CheckBox ID="cbMySqlInstanceExecuteDirect" runat="server" ClientIDMode="Static" Checked="true" Style="vertical-align: middle;" />
+                                <label for="cbMySqlInstanceExecuteDirect" style="vertical-align: middle;">Execute mysql.exe directly with SOURCE command</label>
+                                <br />
+                                <asp:CheckBox ID="cbMySqlInstanceExecuteCmdShell" runat="server" ClientIDMode="Static" Style="vertical-align: middle;" />
+                                <label for="cbMySqlInstanceExecuteCmdShell" style="vertical-align: middle;">Execute mysql.exe through CMD shell with file redirection ( < )</label>
+
+                                <script>
+                                    const directCheckbox = document.getElementById('cbMySqlInstanceExecuteDirect');
+                                    const cmdShellCheckbox = document.getElementById('cbMySqlInstanceExecuteCmdShell');
+
+                                    directCheckbox.addEventListener('change', function () {
+                                        if (this.checked) {
+                                            cmdShellCheckbox.checked = false;
+                                        }
+                                    });
+
+                                    cmdShellCheckbox.addEventListener('change', function () {
+                                        if (this.checked) {
+                                            directCheckbox.checked = false;
+                                        }
+                                    });
+                                </script>
+
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+                <tr>
+                    <td></td>
+                    <td>
+                        <asp:CheckBox ID="cbSkipGetSystemInfo" runat="server" Checked="true" />
+                        Skip Getting System Info (Save 5-10 seconds of initialization)</td>
+                </tr>
+                <tr>
+                    <td></td>
+                    <td>
+                        <asp:CheckBox ID="cbCleanDatabaseAfterUse" runat="server" />
+                        Clean Up Database After Use</td>
+                </tr>
+                <tr>
+                    <td></td>
+                    <td>
+                        <asp:CheckBox ID="cbRunStage1" runat="server" Checked="true" />
+                        Stage 1: Backup/Export - MySqlBackup.NET</td>
+                </tr>
+                <tr>
+                    <td></td>
+                    <td>
+                        <asp:CheckBox ID="cbRunStage2" runat="server" Checked="true" />
+                        Stage 2: Backup/Export - MySqlDump.exe</td>
+                </tr>
+                <tr>
+                    <td></td>
+                    <td>
+                        <asp:CheckBox ID="cbRunStage3" runat="server" Checked="true" />
+                        Stage 3: Restore/Import - MySqlBackup.NET</td>
+                </tr>
+                <tr>
+                    <td></td>
+                    <td>
+                        <asp:CheckBox ID="cbRunStage4" runat="server" Checked="true" />
+                        Stage 4: Restore/Import - mysql.exe</td>
                 </tr>
             </table>
 
-            <asp:Button ID="btRun" runat="server" ClientIDMode="Static" Text="Run Test" OnClick="btRun_Click" OnClientClick="showBigLoading(0); hideButton(this);" />
-
-            <asp:CheckBox ID="cbNoTryCatch" runat="server" />
-            Run Without Try Catch
-            <asp:CheckBox ID="cbCleanDatabaseAfterUse" runat="server" Checked="true" />
-            Clean Up Database After Use 
-
+            <asp:Button ID="btRun" runat="server" ClientIDMode="Static" Text="Begin Performance Benchmark Test" OnClick="btRun_Click" OnClientClick="hideButton(this);" />
         </asp:Panel>
 
-        <asp:Panel ID="panelResult" runat="server">
+        <asp:Panel ID="panelResult" runat="server" Visible="false">
 
             <div id="div-benchmark-report"></div>
 
@@ -282,21 +347,21 @@
 
             <script>
 
-                // let taskid = 1;
                 let intervalId = null;
 
-                // Stage names mapping
                 const stageNames = {
                     1: "Export/Backup - MySqlBackup.NET",
-                    2: "Export/Backup - MySqlDump",
+                    2: "Export/Backup - MySqlDump (mysqldump.exe)",
                     3: "Import/Restore - MySqlBackup.NET",
-                    4: "Import/Restore - MySql Instance"
+                    4: "Import/Restore - MySql (mysql.exe) Instance"
                 };
 
                 function drawUI() {
                     const container = document.getElementById('div-benchmark-report');
 
                     let html = `
+        <h1>Benchmark Results</h1>
+
         <div class="progress-container">
             <div class="progress-bar" id="main-progress-bar">0%</div>
         </div>
@@ -354,36 +419,6 @@
                     container.innerHTML = html;
                 }
 
-                function formatDateTime(dateTimeStr) {
-                    if (!dateTimeStr || dateTimeStr === '0001-01-01T00:00:00' || dateTimeStr === '-') {
-                        return '-';
-                    }
-                    const date = new Date(dateTimeStr);
-                    return date.toLocaleString();
-                }
-
-                function formatTimeSpan(timeSpanStr) {
-                    if (!timeSpanStr || timeSpanStr === '00:00:00' || timeSpanStr === '-') {
-                        return '-';
-                    }
-                    // Parse PT format if present
-                    if (timeSpanStr.startsWith('PT')) {
-                        const match = timeSpanStr.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:([\d.]+)S)?/);
-                        if (match) {
-                            const hours = parseInt(match[1] || 0);
-                            const minutes = parseInt(match[2] || 0);
-                            const seconds = parseFloat(match[3] || 0);
-                            return `${hours}h ${minutes}m ${Math.floor(seconds)}s`;
-                        }
-                    }
-                    // Parse HH:MM:SS format
-                    const parts = timeSpanStr.split(':');
-                    if (parts.length === 3) {
-                        return `${parseInt(parts[0])}h ${parseInt(parts[1])}m ${parseInt(parts[2])}s`;
-                    }
-                    return timeSpanStr;
-                }
-
                 function updateProgress(pr) {
                     let completedTasks = 0;
                     const totalTasks = 12;
@@ -418,9 +453,9 @@
                         }
                     }
 
-                    document.getElementById('span-main-TimeStart').textContent = formatDateTime(pr.TimeStart);
-                    document.getElementById('span-main-TimeEnd').textContent = formatDateTime(pr.TimeEnd);
-                    document.getElementById('span-main-TimeUsed').textContent = formatTimeSpan(pr.TimeUsed);
+                    document.getElementById('span-main-TimeStart').textContent = pr.TimeStartDisplay;
+                    document.getElementById('span-main-TimeEnd').textContent = pr.TimeEndDisplay;
+                    document.getElementById('span-main-TimeUsed').textContent = pr.TimeUsedDisplay;
                     document.getElementById('span-main-HasError').textContent = pr.HasError ? 'Yes' : 'No';
 
                     if (pr.HasError && pr.LastError) {
@@ -431,7 +466,9 @@
 
                     // Update remarks/logs
                     if (pr.Remarks) {
-                        document.getElementById('span-main-Remarks').textContent = pr.Remarks;
+                        let span_main_Remarks = document.getElementById('span-main-Remarks');
+                        span_main_Remarks.textContent = pr.Remarks;
+                        span_main_Remarks.scrollTop = span_main_Remarks.scrollHeight;
                     }
 
                     // Update progress
@@ -479,13 +516,13 @@
 
                             // Update times
                             const timeStartSpan = document.getElementById(`span-${stage}-${round}-TimeStart`);
-                            if (timeStartSpan) timeStartSpan.textContent = formatDateTime(task.TimeStart);
+                            if (timeStartSpan) timeStartSpan.textContent = task.TimeStartDisplay;
 
                             const timeEndSpan = document.getElementById(`span-${stage}-${round}-TimeEnd`);
-                            if (timeEndSpan) timeEndSpan.textContent = formatDateTime(task.TimeEnd);
+                            if (timeEndSpan) timeEndSpan.textContent = task.TimeEndDisplay;
 
                             const timeUsedSpan = document.getElementById(`span-${stage}-${round}-TimeUsed`);
-                            if (timeUsedSpan) timeUsedSpan.textContent = formatTimeSpan(task.TimeUsed);
+                            if (timeUsedSpan) timeUsedSpan.textContent = task.TimeUsedDisplay;
 
                             const hasErrorSpan = document.getElementById(`span-${stage}-${round}-HasError`);
                             if (hasErrorSpan) hasErrorSpan.textContent = task.HasError ? 'Yes' : 'No';
@@ -634,5 +671,7 @@
             </script>
 
         </asp:Panel>
+
     </div>
+
 </asp:Content>
