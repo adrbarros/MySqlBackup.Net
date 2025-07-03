@@ -14,18 +14,20 @@ namespace MySqlBackupTestApp
         {
             InitializeComponent();
 
-            lbVersion.Text = string.Format(@"
-MySqlBackup.NET Testing Tools {0}
-Date: {1}
+            lbVersion.Text = $@"
+MySqlBackup.NET Testing Tools v2.4
+Date: {Program.DateVersion}
+
+Designed for v2.4
 
 MySqlBackup.NET
 A MySQL Database Backup Tool for .NET
 
+*This program is obsoleted. Please use the ASP.NET version for testing
+
 www.mysqlbackup.net
 
-Freeware
-
-Loaded MySqlBackup.DLL Version: {2}", Program.Version, Program.DateVersion, MySqlConnector.MySqlBackup.Version);
+Freeware";
         }
     }
 }

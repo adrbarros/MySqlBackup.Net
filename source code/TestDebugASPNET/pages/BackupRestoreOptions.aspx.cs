@@ -7,6 +7,7 @@ using System.Linq;
 using System.Web;
 using System.Web.UI;
 using System.Web.UI.WebControls;
+using System.IO.Compression;
 
 namespace System.pages
 {
@@ -30,11 +31,19 @@ namespace System.pages
 
         void LoadConstr()
         {
-            txtConnStr.Text = config.ConnString;
-
-            if (config.TestConnectionOk())
+            try
             {
-                LoadDatabaseInfo();
+                txtConnStr.Text = config.ConnString;
+
+                if (config.TestConnectionOk())
+                {
+                    LoadDatabaseInfo();
+                }
+            }
+            catch (Exception ex)
+            {
+                ((masterPage1)this.Master).WriteTopMessageBar("Error: " + ex.Message, false);
+                ((masterPage1)this.Master).ShowMessage("Error", ex.Message, false);
             }
         }
 
@@ -59,7 +68,7 @@ namespace System.pages
                     {
                         return (false, "No database is selected");
                     }
-                    
+
                     lstDocHeaders = ef.GetDocumentHeaders(cmd);
                     dtTable = QueryExpress.GetTable(cmd, "SHOW FULL TABLES WHERE Table_type = 'BASE TABLE';");
                 }
@@ -88,14 +97,37 @@ namespace System.pages
             txtDocumentFooters.Text = string.Join(Environment.NewLine, lstDocFooters);
 
             return (true, "");
+
         }
 
         protected void btSaveConnStr_Click(object sender, EventArgs e)
         {
-            config.SaveConnStr(txtConnStr.Text);
 
             try
             {
+                config.SaveConnStr(txtConnStr.Text);
+
+                MySqlConnectionStringBuilder consb = new MySqlConnectionStringBuilder(txtConnStr.Text);
+                string database = consb.Database;
+
+                if (database != "")
+                {
+                    consb.Database = "";
+
+                    using (var conn = new MySqlConnection(consb.ConnectionString))
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        conn.Open();
+                        string dbName = QueryExpress.ExecuteScalarStr(cmd, $"show databases like '{QueryExpress.EscapeIdentifier(database)}';");
+                        if (dbName != database)
+                        {
+                            cmd.CommandText = $"create database if not exists `{QueryExpress.EscapeIdentifier(database)}`";
+                            cmd.ExecuteNonQuery();
+                            ((masterPage1)this.Master).WriteTopMessageBar($"New database created: {database}", true);
+                        }
+                    }
+                }
+
                 string timenow = "";
 
                 using (MySqlConnection conn = config.GetNewConnection())
@@ -525,6 +557,106 @@ namespace System.pages
 
             ((masterPage1)this.Master).WriteTopMessageBar($"Database restore successful.", true);
             ((masterPage1)this.Master).ShowMessage("Ok", "Database restore success", true);
+        }
+
+        protected void btBackupMemoryStream_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                var exportInfo = GetExportInfo();
+
+                string fileName = $"backup-{DateTime.Now:yyyy-MM-dd_HHmmss}";
+
+                using (var ms = new MemoryStream())
+                using (var msZip = new MemoryStream())
+                {
+                    // Generate MySQL backup
+                    using (MySqlConnection conn = config.GetNewConnection())
+                    {
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            conn.Open();
+                            using (MySqlBackup mb = new MySqlBackup(cmd))
+                            {
+                                mb.ExportInfo = exportInfo;
+                                mb.ExportToStream(ms);
+                            }
+                        }
+                    }
+
+                    // Create zip file
+                    using (ZipStorer zip = ZipStorer.Create(msZip, ""))
+                    {
+                        ms.Position = 0;
+                        string backupFileName = $"{fileName}.sql";
+                        zip.AddStream(ZipStorer.Compression.Deflate, backupFileName, ms, DateTime.Now, "");
+                    }
+
+                    // Send response
+                    msZip.Position = 0;
+                    Response.Clear();
+                    Response.ContentType = "application/zip";
+                    Response.Headers.Add("Content-Length", msZip.Length.ToString());
+                    Response.Headers.Add("Content-Disposition", $"attachment; filename=\"{fileName}.zip\"");
+
+                    // Stream the data instead of loading all into memory
+                    msZip.CopyTo(Response.OutputStream);
+                    Response.Flush();
+                    Response.End();
+                }
+            }
+            catch (Exception ex)
+            {
+                phOutputLog.Controls.Add(new LiteralControl($"Error during restore: {ex.Message}"));
+            }
+        }
+
+        protected void btRestoreMemoryStream_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                byte[] ba = fileUploadRestore.FileBytes;
+                if (ba == null || ba.Length == 0)
+                {
+                    phOutputLog.Controls.Add(new LiteralControl("Please select a backup file to restore."));
+                    return;
+                }
+
+                Stream sqlStream;
+                string uploadedFileName = fileUploadRestore.FileName;
+
+                if (Path.GetExtension(uploadedFileName)?.ToLower() == ".zip")
+                {
+                    using (var uploadedStream = new MemoryStream(ba))
+                    {
+                        sqlStream = new MemoryStream();
+                        ZipHelper.ExtractToStream(uploadedStream, sqlStream);
+                    }
+                }
+                else
+                {
+                    sqlStream = new MemoryStream(ba);
+                }
+
+                using (sqlStream)
+                using (MySqlConnection conn = config.GetNewConnection())
+                {
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        conn.Open();
+                        using (MySqlBackup mb = new MySqlBackup(cmd))
+                        {
+                            mb.ImportFromStream(sqlStream);
+                        }
+                    }
+                }
+
+                phOutputLog.Controls.Add(new LiteralControl("Database restored successfully!"));
+            }
+            catch (Exception ex)
+            {
+                phOutputLog.Controls.Add(new LiteralControl($"Error during restore: {ex.Message}"));
+            }
         }
     }
 }

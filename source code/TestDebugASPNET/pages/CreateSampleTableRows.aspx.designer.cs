@@ -24,6 +24,15 @@ namespace System.pages
         protected global::System.Web.UI.WebControls.Button btGenerateData;
 
         /// <summary>
+        /// txtTotalTables control.
+        /// </summary>
+        /// <remarks>
+        /// Auto-generated field.
+        /// To modify move field declaration from designer file to code-behind file.
+        /// </remarks>
+        protected global::System.Web.UI.WebControls.TextBox txtTotalTables;
+
+        /// <summary>
         /// txtTotalRows control.
         /// </summary>
         /// <remarks>

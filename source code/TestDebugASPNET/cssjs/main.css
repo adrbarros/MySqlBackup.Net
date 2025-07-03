@@ -25,12 +25,12 @@ form {
     padding: 10px;
     font-size: 12pt;
     font-weight: bold;
-    background: #404040;
-    color: #e2e2e2;
+    background: #2e2e2e;
+    color: #569cd6;
 }
 
 .menubar {
-    background: #5b5b5b;
+    background: #454545;
 }
 
     .menubar a {
@@ -42,10 +42,9 @@ form {
     }
 
         .menubar a:hover {
-            color: white;
-            background: #404040;
+            color: #87ffa7;
+            background: #2e2e2e;
         }
-
 
 .div-center-framed-content {
     margin: auto;
@@ -55,13 +54,13 @@ form {
     padding: 20px;
     border-radius: 8px;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    min-height: calc(100vh - 260px);
+    min-height: calc(100vh - 300px);
 }
 
 .main-content {
     padding: 10px;
     height: auto;
-    min-height: calc(100vh - 240px);
+    min-height: calc(100vh - 260px);
 }
 
 .main-content a {
@@ -114,6 +113,13 @@ input[type=text] {
     width: 250px;
 }
 
+input[type=password] {
+    padding: 8px;
+    border: 1px solid #8e8e8e;
+    outline: none;
+    width: 150px;
+}
+
 input[type=number] {
     padding: 8px;
     border: 1px solid #8e8e8e;
@@ -157,11 +163,13 @@ pre {
 }
 
     pre.light-formatted {
-        background: #606060;
+        background: #484848;
         color: #d8d8d8;
         border-radius: 7px;
         padding: 15px;
         font-size: 1.1em;
+        white-space: pre-wrap;
+        word-break: break-all;
     }
 
 .divGoodMsgBar {

@@ -2,7 +2,6 @@
 
 <asp:Content ID="Content1" ContentPlaceHolderID="head" runat="server">
     <style>
-        
         .maintb tr td:first-child {
             text-align: right;
         }
@@ -226,6 +225,15 @@
                 .remarks-content::-webkit-scrollbar-thumb:hover {
                     background: #555;
                 }
+
+        ul ul {
+            list-style-type: "-";
+            padding-left: 20px; /* Controls indentation distance */
+        }
+
+            ul ul li {
+                padding-left: 10px; /* Controls distance between symbol and text */
+            }
     </style>
 </asp:Content>
 <asp:Content ID="Content2" ContentPlaceHolderID="ContentPlaceHolder1" runat="server">
@@ -234,31 +242,58 @@
         <asp:Panel ID="panelSetup" runat="server">
 
             <h1>Benchmark</h1>
-
-            Performance test and comparison of Backup and Restore of using MySqlBackup.NET, MySqlDump and MySql (instance).<br />
-            The test requires this ASP.NET application to be run with "LocalSystem" / "System" / "Administrator" privilege.<br />
+            Performance test and comparison of Backup and Restore using MySqlBackup.NET, MySqlDump, and MySQL (instance).
             <br />
+            Notes:
+            <ul>
+                <li>Running this test in the Visual Studio debugging environment will slow down the process by 2-4 times.</li>
+                <li>For optimum speed, build this project with the [Release] profile and publish it to a folder. Use Windows IIS to run this ASP.NET app.</li>
+                <li>Executing mysqldump.exe and mysql.exe in ASP.NET:
+                    <ul>
+                        <li><strong>Local Windows 10/11 IIS:</strong> Works with default ApplicationPoolIdentity (no privilege changes needed).</li>
+                        <li><strong>Shared Web Hosting:</strong> Executable restrictions prevent running mysql.exe and mysqldump.exe.</li>
+                        <li><strong>Self-owned Windows Server/VPS:</strong> May (may not) require granting file system permissions to ApplicationPoolIdentity or changing to a custom account with MySQL access.</li>
+                    </ul>
+                </li>
+            </ul>
+
+            <hr />
+
             Please manually enter the file path of the following instance:
             <table class="maintb">
                 <tr>
                     <td style="padding-top: 10px; padding-bottom: 0; vertical-align: top;">Initial Schema</td>
                     <td>
-                        <asp:TextBox ID="txtInitialSchema" runat="server" Width="600px"></asp:TextBox><br />
+                        <asp:TextBox ID="txtInitialSchema" runat="server" Width="200px"></asp:TextBox><br />
                         *This database is expected to have already been populated with rows of data.
                     </td>
                 </tr>
                 <tr>
                     <td style="padding-top: 10px; padding-bottom: 0; vertical-align: top;">MySqlDump</td>
                     <td>
-                        <asp:TextBox ID="txtFilePathMySqlDump" runat="server" Width="600px"></asp:TextBox><br />
+                        <asp:TextBox ID="txtFilePathMySqlDump" runat="server" Width="800px"></asp:TextBox><br />
                         *The executable file path of mysqldump.exe
                     </td>
                 </tr>
                 <tr>
                     <td style="padding-top: 10px; padding-bottom: 0; vertical-align: top;">MySql</td>
                     <td>
-                        <asp:TextBox ID="txtFilePathMySql" runat="server" Width="600px"></asp:TextBox><br />
+                        <asp:TextBox ID="txtFilePathMySql" runat="server" Width="800px"></asp:TextBox><br />
                         *The executable file path of mysql.exe
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding-top: 10px; padding-bottom: 0; vertical-align: top;">Output Folder</td>
+                    <td>
+                        <asp:TextBox ID="txtOutputFolder" runat="server" Width="800px"></asp:TextBox><br />
+                        *Destination folder of exported dump files
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding-top: 10px; padding-bottom: 0; vertical-align: top;">Report File</td>
+                    <td>
+                        <asp:TextBox ID="txtReportFilePath" runat="server" TextMode="MultiLine" Style="white-space: pre-wrap; word-wrap: break-word; word-break: break-all; width: 800px; height: 40px;"></asp:TextBox><br />
+                        *Full file path location for saving the report
                     </td>
                 </tr>
                 <tr>
@@ -270,10 +305,12 @@
                                 Select mysql.exe Instance Execution Method:
                             </div>
 
-                            <div style="padding: 10px;">
+                            <div style="padding: 10px; line-height: 300%;">
+
                                 <asp:CheckBox ID="cbMySqlInstanceExecuteDirect" runat="server" ClientIDMode="Static" Checked="true" Style="vertical-align: middle;" />
                                 <label for="cbMySqlInstanceExecuteDirect" style="vertical-align: middle;">Execute mysql.exe directly with SOURCE command</label>
                                 <br />
+
                                 <asp:CheckBox ID="cbMySqlInstanceExecuteCmdShell" runat="server" ClientIDMode="Static" Style="vertical-align: middle;" />
                                 <label for="cbMySqlInstanceExecuteCmdShell" style="vertical-align: middle;">Execute mysql.exe through CMD shell with file redirection ( < )</label>
 
@@ -301,40 +338,60 @@
                 <tr>
                     <td></td>
                     <td>
-                        <asp:CheckBox ID="cbSkipGetSystemInfo" runat="server" Checked="true" />
-                        Skip Getting System Info (Save 5-10 seconds of initialization)</td>
+                        <asp:TextBox ID="txtTotalRound" runat="server" TextMode="Number" Width="40px" Text="3" min="1" max="3"></asp:TextBox>
+                        Total round for each stage (min: 1, max: 3)</td>
                 </tr>
                 <tr>
                     <td></td>
                     <td>
-                        <asp:CheckBox ID="cbCleanDatabaseAfterUse" runat="server" />
-                        Clean Up Database After Use</td>
+                        <asp:CheckBox ID="cbGetSystemInfo" runat="server" Checked="true" />
+                        Get System Info</td>
                 </tr>
                 <tr>
                     <td></td>
                     <td>
                         <asp:CheckBox ID="cbRunStage1" runat="server" Checked="true" />
-                        Stage 1: Backup/Export - MySqlBackup.NET</td>
+                        Run Stage 1: Backup/Export - MySqlBackup.NET - Single Thread</td>
                 </tr>
                 <tr>
                     <td></td>
                     <td>
                         <asp:CheckBox ID="cbRunStage2" runat="server" Checked="true" />
-                        Stage 2: Backup/Export - MySqlDump.exe</td>
+                        Run Stage 2: Backup/Export - MySqlBackup.NET - Parallel Processing</td>
                 </tr>
                 <tr>
                     <td></td>
                     <td>
                         <asp:CheckBox ID="cbRunStage3" runat="server" Checked="true" />
-                        Stage 3: Restore/Import - MySqlBackup.NET</td>
+                        Run Stage 3: Backup/Export - MySqlDump.exe</td>
                 </tr>
                 <tr>
                     <td></td>
                     <td>
                         <asp:CheckBox ID="cbRunStage4" runat="server" Checked="true" />
-                        Stage 4: Restore/Import - mysql.exe</td>
+                        Run Stage 4: Restore/Import - MySqlBackup.NET</td>
+                </tr>
+                <tr>
+                    <td></td>
+                    <td>
+                        <asp:CheckBox ID="cbRunStage5" runat="server" Checked="true" />
+                        Run Stage 5: Restore/Import - mysql.exe</td>
+                </tr>
+                <tr>
+                    <td></td>
+                    <td>
+                        <asp:CheckBox ID="cbCleanDatabaseAfterUse" runat="server" Checked="true" />
+                        Clean Up Database After Use</td>
+                </tr>
+                <tr>
+                    <td></td>
+                    <td>
+                        <asp:CheckBox ID="cbDeleteDumpFile" runat="server" Checked="true" />
+                        Delete dump file immediately after each process. Note: The first dump file must be kept for the import test</td>
                 </tr>
             </table>
+
+            <div style="height: 10px;"></div>
 
             <asp:Button ID="btRun" runat="server" ClientIDMode="Static" Text="Begin Performance Benchmark Test" OnClick="btRun_Click" OnClientClick="hideButton(this);" />
         </asp:Panel>
@@ -346,15 +403,43 @@
             <asp:Literal ID="literalTaskId" runat="server"></asp:Literal>
 
             <script>
-
                 let intervalId = null;
+                let totalRounds = 3; // Default value, will be updated from backend data
 
                 const stageNames = {
                     1: "Export/Backup - MySqlBackup.NET",
-                    2: "Export/Backup - MySqlDump (mysqldump.exe)",
-                    3: "Import/Restore - MySqlBackup.NET",
-                    4: "Import/Restore - MySql (mysql.exe) Instance"
+                    2: "Export/Backup - MySqlBackup.NET - Parallel Processing",
+                    3: "Export/Backup - MySqlDump (mysqldump.exe)",
+                    4: "Import/Restore - MySqlBackup.NET",
+                    5: "Import/Restore - MySql (mysql.exe) Instance"
                 };
+
+                function getActiveStages(pr) {
+                    const activeStages = [];
+                    if (pr.dicStageInfo) {
+                        for (let stageId in pr.dicStageInfo) {
+                            const stage = pr.dicStageInfo[stageId];
+                            if (stage.RunStage) {
+                                activeStages.push(parseInt(stageId));
+                            }
+                        }
+                    }
+                    return activeStages.sort();
+                }
+
+                function getTotalRoundsFromTasks(pr) {
+                    // Determine total rounds from the actual tasks
+                    let maxRound = 0;
+                    if (pr.dicTask) {
+                        for (let taskId in pr.dicTask) {
+                            const task = pr.dicTask[taskId];
+                            if (task.ActiveTask && task.Round > maxRound) {
+                                maxRound = task.Round;
+                            }
+                        }
+                    }
+                    return maxRound > 0 ? maxRound : 3; // Default to 3 if no tasks found
+                }
 
                 function drawUI() {
                     const container = document.getElementById('div-benchmark-report');
@@ -375,18 +460,34 @@
             <div><label>Has Error:</label> <span id="span-main-HasError">No</span></div>
             <div class="error-message" id="main-error-message"></div>
         </div>
+        
+        <div id="stages-container">
+            <!-- Stages will be dynamically added here -->
+        </div>
+
+        <div class="remarks-section">
+            <div class="remarks-title">Process Logs</div>
+            <pre id="span-main-Remarks" class="remarks-content">Waiting for process to start...</pre>
+        </div>
     `;
 
-                    // Create stages
-                    for (let stage = 1; stage <= 4; stage++) {
+                    container.innerHTML = html;
+                }
+
+                function updateStagesUI(activeStages, totalRounds) {
+                    const stagesContainer = document.getElementById('stages-container');
+
+                    let html = '';
+
+                    for (let stage of activeStages) {
                         html += `
-            <div class="stage-section">
+            <div class="stage-section" id="stage-section-${stage}">
                 <div class="stage-title">Stage ${stage}: ${stageNames[stage]}</div>
                 <div class="rounds-container">
         `;
 
-                        // Create rounds for each stage
-                        for (let round = 1; round <= 3; round++) {
+                        // Create rounds based on actual totalRounds
+                        for (let round = 1; round <= totalRounds; round++) {
                             html += `
                 <div class="round-block pending" id="block-${stage}-${round}">
                     <div class="round-title">Round ${round}</div>
@@ -408,37 +509,48 @@
         `;
                     }
 
-                    // Add remarks section at the bottom
-                    html += `
-        <div class="remarks-section">
-            <div class="remarks-title">Process Logs</div>
-            <pre id="span-main-Remarks" class="remarks-content">Waiting for process to start...</pre>
-        </div>
-    `;
-
-                    container.innerHTML = html;
+                    stagesContainer.innerHTML = html;
                 }
 
                 function updateProgress(pr) {
+                    const activeStages = getActiveStages(pr);
+                    const actualTotalRounds = getTotalRoundsFromTasks(pr);
+                    const totalTasks = activeStages.length * actualTotalRounds;
                     let completedTasks = 0;
-                    const totalTasks = 12;
 
-                    // Count completed tasks
+                    // Count completed tasks for active stages only
                     if (pr.dicTask) {
-                        for (let i = 1; i <= totalTasks; i++) {
-                            if (pr.dicTask[i] && pr.dicTask[i].Completed) {
+                        for (let taskId in pr.dicTask) {
+                            const task = pr.dicTask[taskId];
+                            if (task.ActiveTask && task.Completed && activeStages.includes(task.Stage)) {
                                 completedTasks++;
                             }
                         }
                     }
 
-                    const percentage = Math.round((completedTasks / totalTasks) * 100);
+                    const percentage = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
                     const progressBar = document.getElementById('main-progress-bar');
-                    progressBar.style.width = percentage + '%';
-                    progressBar.textContent = percentage + '%';
+                    if (progressBar) {
+                        progressBar.style.width = percentage + '%';
+                        progressBar.textContent = percentage + '%';
+                    }
                 }
 
                 function fillValues(pr) {
+                    const activeStages = getActiveStages(pr);
+                    const actualTotalRounds = getTotalRoundsFromTasks(pr);
+
+                    // Update totalRounds if it has changed
+                    if (totalRounds !== actualTotalRounds) {
+                        totalRounds = actualTotalRounds;
+                    }
+
+                    // Update stages UI if not already done or if stages/rounds changed
+                    const stagesContainer = document.getElementById('stages-container');
+                    if (stagesContainer.children.length === 0) {
+                        updateStagesUI(activeStages, totalRounds);
+                    }
+
                     // Update main info
                     if (pr.Started) {
                         if (pr.HasError) {
@@ -453,33 +565,53 @@
                         }
                     }
 
-                    document.getElementById('span-main-TimeStart').textContent = pr.TimeStartDisplay;
-                    document.getElementById('span-main-TimeEnd').textContent = pr.TimeEndDisplay;
-                    document.getElementById('span-main-TimeUsed').textContent = pr.TimeUsedDisplay;
+                    document.getElementById('span-main-TimeStart').textContent = pr.TimeStartDisplay || '-';
+                    document.getElementById('span-main-TimeEnd').textContent = pr.TimeEndDisplay || '-';
+                    document.getElementById('span-main-TimeUsed').textContent = pr.TimeUsedDisplay || '-';
                     document.getElementById('span-main-HasError').textContent = pr.HasError ? 'Yes' : 'No';
 
                     if (pr.HasError && pr.LastError) {
                         const errorMsg = document.getElementById('main-error-message');
-                        errorMsg.textContent = pr.LastError.Message || 'Unknown error';
-                        errorMsg.classList.add('show');
+                        if (errorMsg) {
+                            errorMsg.textContent = pr.LastError.Message || 'Unknown error';
+                            errorMsg.classList.add('show');
+                        }
                     }
 
                     // Update remarks/logs
                     if (pr.Remarks) {
                         let span_main_Remarks = document.getElementById('span-main-Remarks');
-                        span_main_Remarks.textContent = pr.Remarks;
-                        span_main_Remarks.scrollTop = span_main_Remarks.scrollHeight;
+                        if (span_main_Remarks) {
+                            span_main_Remarks.textContent = pr.Remarks;
+                            span_main_Remarks.scrollTop = span_main_Remarks.scrollHeight;
+                        }
                     }
 
                     // Update progress
                     updateProgress(pr);
 
-                    // Update each task
+                    // Update each task for active stages only
                     if (pr.dicTask) {
                         for (let taskId in pr.dicTask) {
                             const task = pr.dicTask[taskId];
+
+                            // Skip inactive tasks
+                            if (!task.ActiveTask) {
+                                continue;
+                            }
+
                             const stage = task.Stage;
                             const round = task.Round;
+
+                            // Skip if this stage is not active
+                            if (!activeStages.includes(stage)) {
+                                continue;
+                            }
+
+                            // Skip if this round is beyond what we're displaying
+                            if (round > totalRounds) {
+                                continue;
+                            }
 
                             // Update block status
                             const block = document.getElementById(`block-${stage}-${round}`);
@@ -516,13 +648,13 @@
 
                             // Update times
                             const timeStartSpan = document.getElementById(`span-${stage}-${round}-TimeStart`);
-                            if (timeStartSpan) timeStartSpan.textContent = task.TimeStartDisplay;
+                            if (timeStartSpan) timeStartSpan.textContent = task.TimeStartDisplay || '-';
 
                             const timeEndSpan = document.getElementById(`span-${stage}-${round}-TimeEnd`);
-                            if (timeEndSpan) timeEndSpan.textContent = task.TimeEndDisplay;
+                            if (timeEndSpan) timeEndSpan.textContent = task.TimeEndDisplay || '-';
 
                             const timeUsedSpan = document.getElementById(`span-${stage}-${round}-TimeUsed`);
-                            if (timeUsedSpan) timeUsedSpan.textContent = task.TimeUsedDisplay;
+                            if (timeUsedSpan) timeUsedSpan.textContent = task.TimeUsedDisplay || '-';
 
                             const hasErrorSpan = document.getElementById(`span-${stage}-${round}-HasError`);
                             if (hasErrorSpan) hasErrorSpan.textContent = task.HasError ? 'Yes' : 'No';
@@ -594,50 +726,62 @@
                 function showApiError(errorMessage) {
                     // Update the main status to show error
                     const statusSpan = document.getElementById('span-main-status');
-                    statusSpan.textContent = 'Error';
-                    statusSpan.className = 'status-indicator error';
+                    if (statusSpan) {
+                        statusSpan.textContent = 'Error';
+                        statusSpan.className = 'status-indicator error';
+                    }
 
                     // Show the error message
                     const mainErrorDiv = document.getElementById('main-error-message');
-                    mainErrorDiv.textContent = `API Error: ${errorMessage}`;
-                    mainErrorDiv.classList.add('show');
+                    if (mainErrorDiv) {
+                        mainErrorDiv.textContent = `API Error: ${errorMessage}`;
+                        mainErrorDiv.classList.add('show');
+                    }
 
                     // Optional: Show a more prominent error message
                     const container = document.getElementById('div-benchmark-report');
-                    const errorBanner = document.createElement('div');
-                    errorBanner.className = 'error-banner';
-                    errorBanner.innerHTML = `
-        <div style="background-color: #f44336; color: white; padding: 20px; margin: 20px 0; border-radius: 4px;">
-            <h3 style="margin: 0 0 10px 0;">Error: Process Stopped</h3>
-            <p style="margin: 0;">${errorMessage}</p>
-            <button onclick="retryFetch()" style="margin-top: 10px; padding: 5px 15px; background: white; color: #f44336; border: none; border-radius: 3px; cursor: pointer;">Retry</button>
-        </div>
-    `;
-                    container.insertBefore(errorBanner, container.firstChild);
+                    if (container) {
+                        const errorBanner = document.createElement('div');
+                        errorBanner.className = 'error-banner';
+                        errorBanner.innerHTML = `
+            <div style="background-color: #f44336; color: white; padding: 20px; margin: 20px 0; border-radius: 4px;">
+                <h3 style="margin: 0 0 10px 0;">Error: Process Stopped</h3>
+                <p style="margin: 0;">${errorMessage}</p>
+                <button onclick="retryFetch()" style="margin-top: 10px; padding: 5px 15px; background: white; color: #f44336; border: none; border-radius: 3px; cursor: pointer;">Retry</button>
+            </div>
+        `;
+                        container.insertBefore(errorBanner, container.firstChild);
+                    }
                 }
 
                 // Add this function to show network errors
                 function showNetworkError(errorMessage) {
                     const statusSpan = document.getElementById('span-main-status');
-                    statusSpan.textContent = 'Connection Error';
-                    statusSpan.className = 'status-indicator error';
+                    if (statusSpan) {
+                        statusSpan.textContent = 'Connection Error';
+                        statusSpan.className = 'status-indicator error';
+                    }
 
                     const mainErrorDiv = document.getElementById('main-error-message');
-                    mainErrorDiv.textContent = `Network Error: ${errorMessage}`;
-                    mainErrorDiv.classList.add('show');
+                    if (mainErrorDiv) {
+                        mainErrorDiv.textContent = `Network Error: ${errorMessage}`;
+                        mainErrorDiv.classList.add('show');
+                    }
 
                     // Show retry option
                     const container = document.getElementById('div-benchmark-report');
-                    const errorBanner = document.createElement('div');
-                    errorBanner.className = 'error-banner';
-                    errorBanner.innerHTML = `
-        <div style="background-color: #ff9800; color: white; padding: 20px; margin: 20px 0; border-radius: 4px;">
-            <h3 style="margin: 0 0 10px 0;">Connection Error</h3>
-            <p style="margin: 0;">Unable to connect to the server. The connection may have been lost.</p>
-            <button onclick="retryFetch()" style="margin-top: 10px; padding: 5px 15px; background: white; color: #ff9800; border: none; border-radius: 3px; cursor: pointer;">Retry</button>
-        </div>
-    `;
-                    container.insertBefore(errorBanner, container.firstChild);
+                    if (container) {
+                        const errorBanner = document.createElement('div');
+                        errorBanner.className = 'error-banner';
+                        errorBanner.innerHTML = `
+            <div style="background-color: #ff9800; color: white; padding: 20px; margin: 20px 0; border-radius: 4px;">
+                <h3 style="margin: 0 0 10px 0;">Connection Error</h3>
+                <p style="margin: 0;">Unable to connect to the server. The connection may have been lost.</p>
+                <button onclick="retryFetch()" style="margin-top: 10px; padding: 5px 15px; background: white; color: #ff9800; border: none; border-radius: 3px; cursor: pointer;">Retry</button>
+            </div>
+        `;
+                        container.insertBefore(errorBanner, container.firstChild);
+                    }
                 }
 
                 // Add retry functionality
@@ -661,12 +805,24 @@
                     }
                 }
 
+                // Add input validation for total rounds
+                function hideButton(button) {
+                    const totalRoundInput = document.getElementById('txtTotalRound');
+                    if (totalRoundInput) {
+                        let value = parseInt(totalRoundInput.value) || 1;
+                        if (value < 1) value = 1;
+                        if (value > 3) value = 3;
+                        totalRoundInput.value = value;
+                    }
+
+                    button.style.display = 'none';
+                }
+
                 // Initialize
                 drawUI();
 
                 // Start polling
                 fetchProgress(); // Initial fetch
-
                 intervalId = setInterval(fetchProgress, 1000); // Poll every second
             </script>
 

@@ -22,21 +22,37 @@ namespace System.pages
 
         void LoadData()
         {
-            MySqlDatabase d = new MySqlDatabase();
-
-            using (MySqlConnection conn = config.GetNewConnection())
+            try
             {
-                using (var cmd = conn.CreateCommand())
+                string dbName = "";
+
+                MySqlDatabase d = new MySqlDatabase();
+
+                using (MySqlConnection conn = config.GetNewConnection())
                 {
-                    conn.Open();
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        conn.Open();
 
-                    d.GetDatabaseInfo(cmd, GetTotalRowsMethod.Skip);
+                        dbName = QueryExpress.ExecuteScalarStr(cmd, "select database();");
+
+                        if (!string.IsNullOrEmpty(dbName))
+                        {
+                            d.GetDatabaseInfo(cmd, GetTotalRowsMethod.Skip);
+                        }
+                    }
                 }
-            }
 
-            StringBuilder sb = new StringBuilder();
+                if (string.IsNullOrEmpty(dbName))
+                {
+                    ((masterPage1)this.Master).WriteTopMessageBar("No database defined.", false);
+                    ((masterPage1)this.Master).ShowMessage("Error", "No database selected", false);
+                    return;
+                }
 
-            sb.Append($@"
+                StringBuilder sb = new StringBuilder();
+
+                sb.Append($@"
 <table>
 <thead>
 <tr>
@@ -50,23 +66,29 @@ namespace System.pages
 <tbody id='maintb_body'>
 ");
 
-            foreach (var table in d.Tables)
-            {
-                string encodedTableName = Server.HtmlEncode(table.Name);
-                string txtSqlId = $"txtSql_{encodedTableName}";
+                foreach (var table in d.Tables)
+                {
+                    string encodedTableName = Server.HtmlEncode(table.Name);
+                    string txtSqlId = $"txtSql_{encodedTableName}";
 
-                sb.Append($@"
+                    sb.Append($@"
 <tr>
 <td>{table.Name}</td>
 <td style='text-align: center;'><input type='checkbox' name='cbExportTable_{encodedTableName}' onchange=""enableTable(this, '{txtSqlId}')"" checked /></td>
 <td><input id='{txtSqlId}' type='text' name='{txtSqlId}' value='select * from `{Server.HtmlEncode(QueryExpress.EscapeIdentifier(table.Name))}`'></td>
 </tr>
 ");
+                }
+
+                sb.Append("</tbody></table>");
+
+                ph1.Controls.Add(new LiteralControl(sb.ToString()));
             }
-
-            sb.Append("</tbody></table>");
-
-            ph1.Controls.Add(new LiteralControl(sb.ToString()));
+            catch (Exception ex)
+            {
+                ((masterPage1)this.Master).ShowMessage("Error", ex.Message, false);
+                ((masterPage1)this.Master).WriteTopMessageBar("Error<br />" + ex.Message, false);
+            }
         }
 
         protected void btFetchTables_Click(object sender, EventArgs e)
