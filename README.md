@@ -2,7 +2,7 @@
 
 *A versatile tool for backing up and restoring MySQL databases in C#, VB.NET, and ASP.NET.*
 
-*Latest Release: v2.3.9 (March 13, 2025)*  
+*Latest Release: v2.6 (July 04, 2025)*  
 [Change Log](https://github.com/MySqlBackupNET/MySqlBackup.Net/wiki/Change-Log)
 
 ---
@@ -59,41 +59,29 @@ See the detailed guide:
 
 #### Backup a Database
 ```csharp
-string connString = "server=localhost;user=root;pwd=qwerty;database=test;";
+string constr = "server=localhost;user=root;pwd=1234;database=test1;convertzerodatetime=true;";
 string filePath = @"C:\backup.sql";
 
-using (var conn = new MySqlConnection(connString))
+using (var conn = new MySqlConnection(constr))
+using (var cmd = conn.CreateCommand())
+using (var mb = new MySqlBackup(cmd))
 {
-    using (var cmd = new MySqlCommand())
-    {
-        using (var mb = new MySqlBackup(cmd))
-        {
-            cmd.Connection = conn;
-            conn.Open();
-            mb.ExportToFile(filePath);
-            conn.Close();
-        }
-    }
+    conn.Open();
+    mb.ExportToFile(filePath);
 }
 ```
 
 #### Restore a Database
 ```csharp
-string connString = "server=localhost;user=root;pwd=qwerty;database=test;";
+string constr = "server=localhost;user=root;pwd=1234;database=test1;convertzerodatetime=true;";
 string filePath = @"C:\backup.sql";
 
-using (var conn = new MySqlConnection(connString))
+using (var conn = new MySqlConnection(constr))
+using (var cmd = conn.CreateCommand())
+using (var mb = new MySqlBackup(cmd))
 {
-    using (var cmd = new MySqlCommand())
-    {
-        using (var mb = new MySqlBackup(cmd))
-        {
-            cmd.Connection = conn;
-            conn.Open();
-            mb.ImportFromFile(filePath);
-            conn.Close();
-        }
-    }
+    conn.Open();
+    mb.ImportFromFile(filePath);
 }
 ```
 
@@ -125,20 +113,8 @@ MySqlBackup.NET requires one of these MySQL connectors:
 ## Configuration Tips
 
 ### Unicode Support
-For databases with UTF-8 or Unicode characters (e.g., `À`, `Ñ`, Cyrillic, Chinese), use:
-```
-server=localhost;user=root;pwd=qwerty;charset=utf8;
-```
-Or, for broader support:
-```
-server=localhost;user=root;pwd=qwerty;charset=utf8mb4;
-```
-
-### DateTime Handling (MySql.Data Only)
-To avoid conversion errors with null or date-only values, add:
-```
-server=localhost;user=root;pwd=qwerty;charset=utf8;convertzerodatetime=true;
-```
+* Always use the default character set of `utf8mb4`, or `utf8` in older MySQL versions that do not support `utf8mb4`.
+* It is recommended to use `convertzerodatetime=true` in the connection string for compatibility when handling null datetime values.
 
 ---
 

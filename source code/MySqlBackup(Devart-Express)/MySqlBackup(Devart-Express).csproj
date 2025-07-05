@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	
 	<PropertyGroup>
-		<TargetFrameworks>net4;net4.5;net462;net471;net48;net481</TargetFrameworks>
+		<TargetFrameworks>net4.5;net462;net471;net48;net481</TargetFrameworks>
 		<RootNamespace>Devart.Data.MySql</RootNamespace>
 		<DisableImplicitNamespaceImports>true</DisableImplicitNamespaceImports>
 		<Nullable>disable</Nullable>
@@ -14,9 +14,9 @@
 		<PackageProjectUrl>https://github.com/MySqlBackupNET/MySqlBackup.Net</PackageProjectUrl>
 		<RepositoryType>git</RepositoryType>
 		<RepositoryUrl>https://github.com/MySqlBackupNET/MySqlBackup.Net</RepositoryUrl>
-		<Version>2.6.0</Version>
-		<AssemblyVersion>2.6.0</AssemblyVersion>
-		<FileVersion>2.6.0</FileVersion>
+		<Version>2.6.1</Version>
+		<AssemblyVersion>2.6.1</AssemblyVersion>
+		<FileVersion>2.6.1</FileVersion>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<AssemblyName>MySqlBackupNet.DevartExpress</AssemblyName>
 		<PackageTags>mysql;backup;restore;database;devart;dotconnect;express;csharp;dotnet;sql</PackageTags>
