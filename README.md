@@ -39,8 +39,8 @@ Install via NuGet Package Manager:
 
 - **MySqlConnector**:  
   `PM> Install-Package MySqlBackup.NET.MySqlConnector`  
-  https://www.nuget.org/packages/MySqlBackup.NET.MysqlConnector/
-  
+  https://www.nuget.org/packages/MySqlBackup.NET.MySqlConnector/
+
 - **MySql.Data Connector**:  
   `PM> Install-Package MySqlBackup.NET`  
   https://www.nuget.org/packages/MySqlBackup.NET/
@@ -107,6 +107,11 @@ MySqlBackup.NET requires one of these MySQL connectors:
 | **MySql.Data**        | [MySQL Connector/Net](http://www.mysql.com/downloads/connector/net/) | GPL           | `MySql.Data.dll`         |
 | **Devart Express**    | [dotConnect for MySQL](https://www.devart.com/dotconnect/mysql/)     | Custom ([FAQ](https://www.devart.com/dotconnect/mysql/licensing-faq.html)) | `Devart.Data.dll`, `Devart.Data.MySql.dll` |
 
+---
+
+## Compatibility
+
+We aim for MySqlBackup.NET to achieve 100% SQL compliance, ensuring seamless compatibility with `mysqldump` and `mysql.exe` for both backup and restore operations. Version 2.6 introduces key improvements, addressing some flaws in previous version and compatibility challenges with `mysqldump`-generated files. If you encounter any incompatibilities, we welcome feedback via [GitHub Issues](https://github.com/MySqlBackupNET/MySqlBackup.Net/issues) to help us refine and uphold this goal.
 
 ---
 
@@ -120,24 +125,19 @@ MySqlBackup.NET requires one of these MySQL connectors:
 
 ## Performance Benchmark
 
-Compare MySqlBackup.NET to MySqlDump for a 3.5GB database (15M rows):
+For a 416 MB database (400,000 rows, 4 tables, InnoDB) on an Intel Core i7-4770S (3.10GHz, 16GB RAM, SSD Samsung 870 Evo 500GB):
 
-| Task         | Tool              | Time    | File Size      |
-|--------------|-------------------|---------|----------------|
-| **Backup**   | MySqlDump         | ~2m 35s | 4.66 GB        |
-| **Backup**   | MySqlBackup.NET   | ~7m 48s | 4.59 GB        |
-| **Restore**  | MySql.exe         | ~8m 41s | -              |
-| **Restore**  | MySqlBackup.NET   | ~9m 41s | -              |
+![graph benchmark mysqlbackup.net 2025-07-04](https://raw.githubusercontent.com/MySqlBackupNET/MySqlBackup.Net/refs/heads/master/wiki/graph-benchmark-2025-07-04.png)
 
-Full details: [Performance Benchmark Wiki](https://github.com/MySqlBackupNET/MySqlBackup.Net/wiki/Performance-Benchmark-(MySqlDump-vs-MySqlBackup.NET))
+| Task         | Tool              | Avg. Time | File Size  |
+|--------------|-------------------|-----------|------------|
+| **Backup**   | MySqlBackup.NET (Parallel) | ~10.21s | 571.588 MB |
+| **Backup**   | MySqlBackup.NET (Single)   | ~15.72s | 571.588 MB |
+| **Backup**   | mysqldump.exe     | ~6.76s  | 566.976 MB |
+| **Restore**  | MySqlBackup.NET   | ~35.87s | -          |
+| **Restore**  | mysql.exe         | ~32.76s | -          |
 
----
-
-## Additional Tools
-
-**Backup All Databases**  
-Export all databases to separate SQL files with this sub-project:  
-[MySqlBackup_All_DB](https://github.com/MySqlBackupNET/MySqlBackup_All_DB)
+MySqlBackup.NET v2.6 offers competitive performance, especially in parallel mode, with significant improvements over previous versions. Full details: [Performance Benchmark Wiki](https://github.com/MySqlBackupNET/MySqlBackup.Net/wiki/Performance-Benchmark-(MySqlBackup.NET,-MySqlDump,-MySQL.EXE)).
 
 ---
 
@@ -149,6 +149,6 @@ MySqlBackup.NET is released under [The Unlicense](https://github.com/MySqlBackup
 
 ## Conclusion
 
-MySqlBackup.NET empowers developers and end-users alike with a robust, .NET-native solution for MySQL database management. Whether for desktop apps, web services, or automated backups, it’s a versatile addition to your toolkit.
+MySqlBackup.NET empowers developers and end-users alike with a robust, .NET-native solution for MySQL database management. Whether for desktop apps, web services, or automated backups, it’s a versatile addition to your toolkit, built by a global community for a global community.
 
 Explore more on [GitHub](https://github.com/MySqlBackupNET/MySqlBackup.Net)!
