@@ -27,9 +27,7 @@
             <button type="button" onclick="changeTheme('light');">Light</button>
             <button type="button" onclick="changeTheme('dark');">Dark</button>
             <button type="button" onclick="changeTheme('cyberpunk');">Cyberpunk</button>
-            <button type="button" onclick="changeTheme('retro');">
-                Terminal<br />
-                Alien 1986</button>
+            <button type="button" onclick="changeTheme('retro');">Retro Terminal</button>
             <button type="button" onclick="changeTheme('steampunk');">
                 Steampunk<br />
                 Victorian</button>
@@ -58,7 +56,12 @@
             div.append(newWidget);
 
             // Build a MySqlBackupProgress widget object
-            MySqlBackupProgress.init(newWidget.id, { apiUrl: urlApiEndPoint, widgetId: newWidgetId });
+            MySqlBackupProgress.init(
+                newWidget.id,
+                {
+                    apiUrl: urlApiEndPoint,
+                    widgetId: newWidgetId
+                });
         }
 
         function changeTheme(themename) {

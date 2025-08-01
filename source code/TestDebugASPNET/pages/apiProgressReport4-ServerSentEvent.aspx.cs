@@ -1,33 +1,38 @@
-﻿using MySqlConnector;
-using System;
-using System.Collections.Concurrent;
+﻿using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Data;
 using System.IO;
 using System.Linq;
-using System.Text.Json;
+using System.Net.WebSockets;
 using System.Text.Json.Serialization;
+using System.Text.Json;
+using System.Text;
 using System.Threading.Tasks;
+using System.Threading;
 using System.Web;
 using System.Web.UI;
 using System.Web.UI.WebControls;
+using System.Web.WebSockets;
+using System.Collections.Concurrent;
+using MySqlConnector;
 
 namespace System.pages
 {
-    public partial class apiProgressReport2 : System.Web.UI.Page
+    public partial class apiProgressReport4_ServerSentEvent : System.Web.UI.Page
     {
-        static ConcurrentDictionary<int, TaskInfo4> dicTask = new ConcurrentDictionary<int, TaskInfo4>();
+        static ConcurrentDictionary<int, TaskInfo5> dicTaskInfo = new ConcurrentDictionary<int, TaskInfo5>();
 
         protected void Page_Load(object sender, EventArgs e)
         {
-            if (!IsUserAuthenticated())
+            // Check if this is an Server-Sent Event request
+            if (Request.Headers["Accept"] == "text/event-stream" || Request.QueryString["stream"] == "true")
             {
-                // HTTP Error 401 Unauthorized
-                Response.StatusCode = 401;
-                Response.Write("Unauthorized Access");
+                HandleSSERequest();
                 return;
             }
+
+            // Serves as API Endpoint
 
             try
             {
@@ -36,29 +41,32 @@ namespace System.pages
                 switch (action)
                 {
                     case "start_backup":
-                        Backup();
+                        StartBackup();
                         break;
                     case "start_restore":
-                        Restore();
-                        break;
-                    case "stop_task":
-                        Stop();
+                        StartRestore();
                         break;
                     case "get_status":
                         GetStatus();
                         break;
-                    case "remove_task":
+                    case "stop_task":
+                        Stop();
+                        break;
+                    case "get_all_task":
+                        GetAllTasks();
+                        break;
+                    case "removetask":
                         RemoveTask();
                         break;
                     case "":
                         // HTTP Error 400 Bad Request
                         Response.StatusCode = 400;
-                        Response.Write("Empty Request");
+                        Response.Write("Empty request");
                         break;
                     default:
-                        // HTTP Error 406 Not Acceptable
-                        Response.StatusCode = 406;
-                        Response.Write($"Unsupported action: {action}");
+                        // HTTP Error 405 Method Not Allowed
+                        Response.StatusCode = 405;
+                        Response.Write($"Action not supported: {action}");
                         break;
                 }
             }
@@ -84,6 +92,94 @@ namespace System.pages
             return true;
         }
 
+        private void HandleSSERequest()
+        {
+            if (!IsUserAuthenticated())
+            {
+                Response.StatusCode = 401;
+                Response.Write("Unauthorized");
+                Response.End();
+                return;
+            }
+
+            if (!int.TryParse(Request["taskid"] + "", out int taskId))
+            {
+                Response.StatusCode = 400;
+                Response.Write("Invalid or missing taskid parameter");
+                Response.End();
+                return;
+            }
+
+            // Set SSE headers
+            Response.ContentType = "text/event-stream";
+            Response.CacheControl = "no-cache";
+            Response.AddHeader("Connection", "keep-alive");
+            Response.AddHeader("Access-Control-Allow-Origin", "*");
+            Response.AddHeader("Access-Control-Allow-Headers", "Cache-Control");
+            Response.Buffer = false;
+
+            try
+            {
+                // Send initial connection event
+                SendSSEEvent("connected", $"Subscribed to task {taskId}");
+
+                while (Response.IsClientConnected)
+                {
+                    var taskInfo = GetTaskInfoObject(taskId);
+
+                    if (taskInfo != null)
+                    {
+                        // Send progress update for active task
+                        SendSSEEvent("progress", JsonSerializer.Serialize(taskInfo));
+
+                        // If task is completed, send final update and close
+                        if (taskInfo.IsCompleted)
+                        {
+                            SendSSEEvent("completed", JsonSerializer.Serialize(taskInfo));
+
+                            // terminate the loop
+                            break;
+                        }
+                    }
+
+                    Thread.Sleep(250); // Check every second
+                }
+            }
+            catch (HttpException)
+            {
+                // Client disconnected
+            }
+            finally
+            {
+                Response.End();
+            }
+        }
+
+        private void SendSSEEvent(string eventType, string data, string id = null)
+        {
+            try
+            {
+                if (!Response.IsClientConnected)
+                    return;
+
+                var eventData = new StringBuilder();
+
+                if (!string.IsNullOrEmpty(id))
+                    eventData.AppendLine($"id: {id}");
+
+                eventData.AppendLine($"event: {eventType}");
+                eventData.AppendLine($"data: {data}");
+                eventData.AppendLine(); // Empty line required by SSE spec
+
+                Response.Write(eventData.ToString());
+                Response.Flush();
+            }
+            catch (HttpException)
+            {
+                // Client disconnected
+            }
+        }
+
         int GetNewTaskId()
         {
             int newTaskId = 0;
@@ -107,29 +203,34 @@ namespace System.pages
             return newTaskId;
         }
 
-        public void Backup()
+        void StartBackup()
         {
             try
             {
-                int taskId = GetNewTaskId();
-
-                TaskInfo4 taskInfo = new TaskInfo4();
-                taskInfo.TaskId = taskId;
-                taskInfo.TaskType = 1; // backup
-                taskInfo.TimeStart = DateTime.Now;
-
-                dicTask[taskId] = taskInfo;
-
-                _ = Task.Run(() => { BeginBackup(taskId); });
-
-                var result = new
+                if (!IsUserAuthenticated())
                 {
-                    TaskId = taskId
-                };
+                    // HTTP Error 401 Unauthorized
+                    Response.StatusCode = 401;
+                    Response.Write("Unauthorized");
+                    return;
+                }
 
-                var json = JsonSerializer.Serialize(result);
+                int newTaskId = GetNewTaskId();
+
+                TaskInfo5 taskInfo = new TaskInfo5();
+                taskInfo.TaskId = newTaskId;
+                taskInfo.TimeStart = DateTime.Now;
+                taskInfo.TaskType = 1; // backup
+
+                dicTaskInfo[newTaskId] = taskInfo;
+
+                // Start process in another separated thread
+                _ = Task.Run(() => BackupBegin(newTaskId));
+
+                // Return task ID immediately
+                var result = new { TaskId = newTaskId, Status = "Backup started" };
                 Response.ContentType = "application/json";
-                Response.Write(json);
+                Response.Write(JsonSerializer.Serialize(result));
             }
             catch (Exception ex)
             {
@@ -139,9 +240,72 @@ namespace System.pages
             }
         }
 
-        public void BeginBackup(int taskId)
+        void StartRestore()
         {
-            if (dicTask.TryGetValue(taskId, out var taskInfo))
+            try
+            {
+                if (!IsUserAuthenticated())
+                {
+                    // HTTP Error 401 Unauthorized
+                    Response.StatusCode = 401;
+                    Response.Write("Unauthorized");
+                    return;
+                }
+
+                if (Request.Files.Count == 0 || Request.Files[0].ContentLength == 0)
+                {
+                    Response.StatusCode = 400;
+                    Response.Write("No file uploaded");
+                    return;
+                }
+
+                var file = Request.Files[0];
+                int newTaskId = GetNewTaskId();
+
+                TaskInfo5 taskInfo = new TaskInfo5();
+                taskInfo.TaskId = newTaskId;
+                taskInfo.TimeStart = DateTime.Now;
+                taskInfo.TaskType = 2; // restore
+                taskInfo.FileName = file.FileName;
+
+                dicTaskInfo[newTaskId] = taskInfo;
+
+                // Save and process uploaded file
+                string folder = Server.MapPath("~/App_Data/backup");
+                Directory.CreateDirectory(folder);
+                string fileName = $"restore_{newTaskId}_{DateTime.Now:yyyyMMdd_HHmmss}{Path.GetExtension(file.FileName)}";
+                string filePath = Path.Combine(folder, fileName);
+
+                file.SaveAs(filePath);
+
+                // Handle ZIP extraction if needed
+                string sqlFilePath = filePath;
+                if (file.FileName.ToLower().EndsWith(".zip"))
+                {
+                    string sqlFileName = Path.ChangeExtension(fileName, ".sql");
+                    sqlFilePath = Path.Combine(folder, sqlFileName);
+                    ZipHelper.ExtractFile(filePath, sqlFilePath);
+                }
+
+                // Start process in another separated thread
+                _ = Task.Run(() => RestoreBegin(newTaskId, sqlFilePath));
+
+                // Return task ID immediately
+                var result = new { TaskId = newTaskId, Status = "File uploaded, restore started" };
+                Response.ContentType = "application/json";
+                Response.Write(JsonSerializer.Serialize(result));
+            }
+            catch (Exception ex)
+            {
+                // HTTP Error 500 Internal Server Error
+                Response.StatusCode = 500;
+                Response.Write(ex.Message);
+            }
+        }
+
+        void BackupBegin(int taskId)
+        {
+            if (dicTaskInfo.TryGetValue(taskId, out var taskInfo))
             {
                 try
                 {
@@ -187,95 +351,13 @@ namespace System.pages
 
                 SaveTaskSQLite(taskInfo);
 
-                dicTask.TryRemove(taskId, out _);
+                dicTaskInfo.TryRemove(taskId, out _);
             }
         }
 
-        void Mb_ExportProgressChanged(object sender, ExportProgressArgs e, int taskId)
+        void RestoreBegin(int thisTaskId, string filePathSql)
         {
-            if (dicTask.TryGetValue(taskId, out var taskInfo))
-            {
-                taskInfo.TotalTables = e.TotalTables;
-                taskInfo.CurrentTableIndex = e.CurrentTableIndex;
-                taskInfo.CurrentTableName = e.CurrentTableName;
-                taskInfo.TotalRows = e.TotalRowsInAllTables;
-                taskInfo.CurrentRows = e.CurrentRowIndexInAllTables;
-                taskInfo.TotalRowsCurrentTable = e.TotalRowsInCurrentTable;
-                taskInfo.CurrentRowsCurrentTable = e.CurrentRowIndexInCurrentTable;
-
-                if (taskInfo.RequestCancel)
-                {
-                    ((MySqlBackup)sender).StopAllProcess();
-                }
-            }
-        }
-
-        void Restore()
-        {
-            try
-            {
-                if (!IsUserAuthenticated())
-                {
-                    // HTTP Error 401 Unauthorized
-                    Response.StatusCode = 401;
-                    Response.Write("Unauthorized");
-                    return;
-                }
-
-                if (Request.Files.Count == 0 || Request.Files[0].ContentLength == 0)
-                {
-                    Response.StatusCode = 400;
-                    Response.Write("No file uploaded");
-                    return;
-                }
-
-                var file = Request.Files[0];
-                int newTaskId = GetNewTaskId();
-
-                TaskInfo4 taskInfo = new TaskInfo4();
-                taskInfo.TaskId = newTaskId;
-                taskInfo.TimeStart = DateTime.Now;
-                taskInfo.TaskType = 2; // restore
-                taskInfo.FileName = file.FileName;
-
-                dicTask[newTaskId] = taskInfo;
-
-                // Save and process uploaded file
-                string folder = Server.MapPath("~/App_Data/backup");
-                Directory.CreateDirectory(folder);
-                string fileName = $"restore_{newTaskId}_{DateTime.Now:yyyyMMdd_HHmmss}{Path.GetExtension(file.FileName)}";
-                string filePath = Path.Combine(folder, fileName);
-
-                file.SaveAs(filePath);
-
-                // Handle ZIP extraction if needed
-                string sqlFilePath = filePath;
-                if (file.FileName.ToLower().EndsWith(".zip"))
-                {
-                    string sqlFileName = Path.ChangeExtension(fileName, ".sql");
-                    sqlFilePath = Path.Combine(folder, sqlFileName);
-                    ZipHelper.ExtractFile(filePath, sqlFilePath);
-                }
-
-                // Start process in another separated thread
-                _ = Task.Run(() => BeginRestore(newTaskId, sqlFilePath));
-
-                // Return task ID immediately
-                var result = new { TaskId = newTaskId, Status = "File uploaded, restore started" };
-                Response.ContentType = "application/json";
-                Response.Write(JsonSerializer.Serialize(result));
-            }
-            catch (Exception ex)
-            {
-                // HTTP Error 500 Internal Server Error
-                Response.StatusCode = 500;
-                Response.Write(ex.Message);
-            }
-        }
-
-        void BeginRestore(int thisTaskId, string filePathSql)
-        {
-            if (dicTask.TryGetValue(thisTaskId, out TaskInfo4 taskInfo))
+            if (dicTaskInfo.TryGetValue(thisTaskId, out TaskInfo5 taskInfo))
             {
                 try
                 {
@@ -287,7 +369,6 @@ namespace System.pages
                     using (var mb = new MySqlBackup(cmd))
                     {
                         conn.Open();
-                        mb.ImportInfo.EnableParallelProcessing = false;
                         mb.ImportInfo.IntervalForProgressReport = 200;
                         mb.ImportProgressChanged += (sender, e) => Mb_ImportProgressChanged(sender, e, thisTaskId);
                         mb.ImportFromFile(filePathSql);
@@ -309,13 +390,32 @@ namespace System.pages
 
                 SaveTaskSQLite(taskInfo);
 
-                dicTask.TryRemove(thisTaskId, out _);
+                dicTaskInfo.TryRemove(thisTaskId, out _);
             }
         }
 
-        void Mb_ImportProgressChanged(object sender, ImportProgressArgs e, int thisTaskId)
+        private void Mb_ExportProgressChanged(object sender, ExportProgressArgs e, int thisTaskId)
         {
-            if (dicTask.TryGetValue(thisTaskId, out var taskInfo))
+            if (dicTaskInfo.TryGetValue(thisTaskId, out var taskInfo))
+            {
+                taskInfo.TotalTables = e.TotalTables;
+                taskInfo.CurrentTableIndex = e.CurrentTableIndex;
+                taskInfo.CurrentTableName = e.CurrentTableName;
+                taskInfo.TotalRows = e.TotalRowsInAllTables;
+                taskInfo.CurrentRows = e.CurrentRowIndexInAllTables;
+                taskInfo.TotalRowsCurrentTable = e.TotalRowsInCurrentTable;
+                taskInfo.CurrentRowsCurrentTable = e.CurrentRowIndexInCurrentTable;
+
+                if (taskInfo.RequestCancel)
+                {
+                    ((MySqlBackup)sender).StopAllProcess();
+                }
+            }
+        }
+
+        private void Mb_ImportProgressChanged(object sender, ImportProgressArgs e, int thisTaskId)
+        {
+            if (dicTaskInfo.TryGetValue(thisTaskId, out var taskInfo))
             {
                 taskInfo.TotalBytes = e.TotalBytes;
                 taskInfo.CurrentBytes = e.CurrentBytes;
@@ -333,25 +433,24 @@ namespace System.pages
             {
                 if (int.TryParse(Request["taskid"] + "", out int taskid))
                 {
-                    if (dicTask.TryGetValue(taskid, out TaskInfo4 taskInfo))
+                    var taskInfo = GetTaskInfoObject(taskid);
+
+                    if (taskInfo != null)
                     {
                         taskInfo.RequestCancel = true;
-
-                        // do not modify response code
-                        // default response status = 200 = ok/success
                     }
                     else
                     {
                         // HTTP Error 404 Not Found
                         Response.StatusCode = 404;
-                        Response.Write($"Task has already completed and stopped or it is an invalid Task ID.");
+                        Response.Write($"Task ID not found: {taskid}");
                     }
                 }
                 else
                 {
-                    // HTTP Error 404 Not Found
+                    // HTTP Error 400 Bad Request
                     Response.StatusCode = 400;
-                    Response.Write($"Empty or Invalid Task ID.");
+                    Response.Write($"Invalid Task ID");
                 }
             }
             catch (Exception ex)
@@ -362,17 +461,29 @@ namespace System.pages
             }
         }
 
+        TaskInfo5 GetTaskInfoObject(int taskid)
+        {
+            TaskInfo5 taskInfo = null;
+
+            if (dicTaskInfo.TryGetValue(taskid, out taskInfo))
+            {
+
+            }
+            else
+            {
+                taskInfo = GetTaskSQLite(taskid);
+            }
+
+            return taskInfo;
+        }
+
         void GetStatus()
         {
             try
             {
                 if (int.TryParse(Request["taskid"] + "", out int taskid))
                 {
-                    int.TryParse(Request["api_call_index"] + "", out int api_call_index);
-
-                    TaskInfo4 taskInfo = GetTaskInfoObject(taskid);
-
-                    taskInfo.ApiCallIndex = api_call_index;
+                    TaskInfo5 taskInfo = GetTaskInfoObject(taskid);
 
                     if (taskInfo != null)
                     {
@@ -408,7 +519,7 @@ namespace System.pages
             {
                 if (int.TryParse(Request["taskid"] + "", out int taskid))
                 {
-                    TaskInfo4 taskInfo = GetTaskInfoObject(taskid);
+                    TaskInfo5 taskInfo = GetTaskInfoObject(taskid);
 
                     if (taskInfo != null)
                     {
@@ -424,7 +535,7 @@ namespace System.pages
                             }
                             catch { }
                         }
-                        dicTask.TryRemove(taskid, out _);
+                        dicTaskInfo.TryRemove(taskid, out _);
 
                         RemoveTaskSQLite(taskid);
                     }
@@ -449,23 +560,28 @@ namespace System.pages
             }
         }
 
-        TaskInfo4 GetTaskInfoObject(int taskid)
+        void GetAllTasks()
         {
-            TaskInfo4 taskInfo = null;
-
-            if (dicTask.TryGetValue(taskid, out taskInfo))
+            try
             {
+                var allTasks = dicTaskInfo.Values
+                    .Concat(GetAllTasksSQLite())
+                    .OrderByDescending(t => t.TimeStart)
+                    .ToList();
 
+                string json = JsonSerializer.Serialize(allTasks);
+                Response.ContentType = "application/json";
+                Response.Write(json);
             }
-            else
+            catch (Exception ex)
             {
-                taskInfo = GetTaskSQLite(taskid);
+                // HTTP Error 500 Internal Server Error
+                Response.StatusCode = 500;
+                Response.Write(ex.Message);
             }
-
-            return taskInfo;
         }
 
-        void SaveTaskSQLite(TaskInfo4 taskInfo)
+        void SaveTaskSQLite(TaskInfo5 taskInfo)
         {
             string sqliteConstr = BackupFilesManager.sqliteConnectionString;
 
@@ -478,7 +594,6 @@ namespace System.pages
                 // Check if table exists and create if not
                 var tables = helper.GetTableList();
                 bool tableExists = false;
-
                 foreach (DataRow row in tables.Rows)
                 {
                     if (row["Tables"].ToString().ToLower() == "progress_report3")
@@ -490,7 +605,7 @@ namespace System.pages
 
                 if (!tableExists)
                 {
-                    // Create table based on TaskInfo3 properties
+                    // Create table based on TaskInfo5 properties
                     var table = new SQLiteTable("progress_report3");
                     table.Columns.Add(new SQLiteColumn("TaskId", ColType.Integer, true, true, true, "")); // Primary key
                     table.Columns.Add(new SQLiteColumn("TaskType", ColType.Integer));
@@ -557,7 +672,7 @@ namespace System.pages
             }
         }
 
-        private TaskInfo4 GetTaskSQLite(int taskid)
+        private TaskInfo5 GetTaskSQLite(int taskid)
         {
             string sqliteConstr = BackupFilesManager.sqliteConnectionString;
 
@@ -592,7 +707,7 @@ namespace System.pages
 
                     var row = dt.Rows[0];
 
-                    return new TaskInfo4
+                    return new TaskInfo5
                     {
                         TaskId = Convert.ToInt32(row["TaskId"]),
                         TaskType = Convert.ToInt32(row["TaskType"]),
@@ -619,6 +734,72 @@ namespace System.pages
                 catch
                 {
                     return null;
+                }
+            }
+        }
+
+        private List<TaskInfo5> GetAllTasksSQLite()
+        {
+            string sqliteConstr = BackupFilesManager.sqliteConnectionString;
+
+            using (var conn = new SQLiteConnection(sqliteConstr))
+            using (var cmd = conn.CreateCommand())
+            {
+                conn.Open();
+                var helper = new SQLiteHelper(cmd);
+
+                // Check if table exists
+                var tables = helper.GetTableList();
+                bool tableExists = false;
+                foreach (DataRow row in tables.Rows)
+                {
+                    if (row["Tables"].ToString().ToLower() == "progress_report3")
+                    {
+                        tableExists = true;
+                        break;
+                    }
+                }
+
+                if (!tableExists)
+                    return new List<TaskInfo5>();
+
+                try
+                {
+                    var dt = helper.Select("SELECT * FROM progress_report3 ORDER BY TimeStart DESC");
+                    var list = new List<TaskInfo5>();
+
+                    foreach (DataRow row in dt.Rows)
+                    {
+                        list.Add(new TaskInfo5
+                        {
+                            TaskId = Convert.ToInt32(row["TaskId"]),
+                            TaskType = Convert.ToInt32(row["TaskType"]),
+                            TimeStart = Convert.ToDateTime(row["TimeStart"]),
+                            TimeEnd = Convert.ToDateTime(row["TimeEnd"]),
+                            FileName = row["FileName"].ToString(),
+                            FileSha256 = row["FileSha256"].ToString(),
+                            IsCompleted = Convert.ToInt32(row["IsCompleted"]) == 1,
+                            IsCancelled = Convert.ToInt32(row["IsCancelled"]) == 1,
+                            RequestCancel = Convert.ToInt32(row["RequestCancel"]) == 1,
+                            HasError = Convert.ToInt32(row["HasError"]) == 1,
+                            ErrorMsg = row["ErrorMsg"].ToString(),
+                            TotalTables = Convert.ToInt32(row["TotalTables"]),
+                            CurrentTableIndex = Convert.ToInt32(row["CurrentTableIndex"]),
+                            CurrentTableName = row["CurrentTableName"].ToString(),
+                            TotalRows = Convert.ToInt64(row["TotalRows"]),
+                            CurrentRows = Convert.ToInt64(row["CurrentRows"]),
+                            TotalRowsCurrentTable = Convert.ToInt64(row["TotalRowsCurrentTable"]),
+                            CurrentRowsCurrentTable = Convert.ToInt64(row["CurrentRowsCurrentTable"]),
+                            TotalBytes = Convert.ToInt64(row["TotalBytes"]),
+                            CurrentBytes = Convert.ToInt64(row["CurrentBytes"])
+                        });
+                    }
+
+                    return list;
+                }
+                catch
+                {
+                    return new List<TaskInfo5>();
                 }
             }
         }
@@ -654,10 +835,8 @@ namespace System.pages
         }
     }
 
-    class TaskInfo4
+    class TaskInfo5
     {
-        public int ApiCallIndex { get; set; }
-
         public int TaskId { get; set; }
         public int TaskType { get; set; } // 1 = Backup, 2 = Restore
 
@@ -712,21 +891,6 @@ namespace System.pages
 
         public long TotalBytes { get; set; }
         public long CurrentBytes { get; set; }
-
-        [JsonPropertyName("Status")]
-        public string Status
-        {
-            get
-            {
-                if (HasError)
-                    return "Error";
-                if (IsCancelled)
-                    return "Cancelled";
-                if (IsCompleted)
-                    return "Completed";
-                return "Running";
-            }
-        }
 
         [JsonPropertyName("PercentCompleted")]
         public int PercentCompleted
