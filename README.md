@@ -2,7 +2,7 @@
 
 *A versatile tool for backing up and restoring MySQL databases in C#, VB.NET, and ASP.NET.*
 
-*Latest Release: v2.6.5 (August 5th, 2025)*  
+*Latest Release: v2.7 (March 21st, 2026)*  
 [Change Log](https://github.com/MySqlBackupNET/MySqlBackup.Net/wiki/Change-Log)
 
 ---
@@ -57,14 +57,27 @@ See the detailed guide:
 
 ### Basic Usage
 
+Start by adding the appropriate using statement to your file:
+
+```csharp
+// For MySqlConnector.NET (MIT)
+using MySqlConnector;
+
+// For MySQL .NET Connector by Oracle
+using MySql.Data.MySqlClient;
+
+// For dotConnect for MySQL by Devart
+using Devart.Data.MySql;
+```
+
 #### Backup a Database
 ```csharp
 string constr = "server=localhost;user=root;pwd=1234;database=test1;convertzerodatetime=true;";
 string filePath = @"C:\backup.sql";
 
-using (var conn = new MySqlConnection(constr))
-using (var cmd = conn.CreateCommand())
-using (var mb = new MySqlBackup(cmd))
+using (MySqlConnection conn = new MySqlConnection(constr))
+using (MySqlCommand cmd = conn.CreateCommand())
+using (MySqlBackup mb = new MySqlBackup(cmd))
 {
     conn.Open();
     mb.ExportToFile(filePath);
@@ -76,9 +89,9 @@ using (var mb = new MySqlBackup(cmd))
 string constr = "server=localhost;user=root;pwd=1234;database=test1;convertzerodatetime=true;";
 string filePath = @"C:\backup.sql";
 
-using (var conn = new MySqlConnection(constr))
-using (var cmd = conn.CreateCommand())
-using (var mb = new MySqlBackup(cmd))
+using (MySqlConnection conn = new MySqlConnection(constr))
+using (MySqlCommand cmd = conn.CreateCommand())
+using (MySqlBackup mb = new MySqlBackup(cmd))
 {
     conn.Open();
     mb.ImportFromFile(filePath);
@@ -146,9 +159,5 @@ MySqlBackup.NET v2.6 offers competitive performance, especially in parallel mode
 MySqlBackup.NET is released under [The Unlicense](https://github.com/MySqlBackupNET/MySqlBackup.Net/blob/master/LICENSE), making it free for any use.
 
 ---
-
-## Conclusion
-
-MySqlBackup.NET empowers developers and end-users alike with a robust, .NET-native solution for MySQL database management. Whether for desktop apps, web services, or automated backups, it’s a versatile addition to your toolkit, built by a global community for a global community.
 
 Explore more on [GitHub](https://github.com/MySqlBackupNET/MySqlBackup.Net)!
