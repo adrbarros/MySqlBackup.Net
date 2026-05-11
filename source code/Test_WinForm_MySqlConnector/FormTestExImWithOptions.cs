@@ -51,7 +51,7 @@ namespace MySqlBackupTestApp
                             mb.ExportInfo.AddDropDatabase = cbAddDropDatabase.Checked;
                             mb.ExportInfo.AddCreateDatabase = cbExAddCreateDatabase.Checked;
                             mb.ExportInfo.AddDropTable = cbAddDropTable.Checked;
-                            mb.ExportInfo.ExportTableStructure = cbAddDropTable.Checked;
+                            mb.ExportInfo.ExportTableStructure = cbAddCreateTable.Checked;
                             mb.ExportInfo.ExportRows = cbExExportRows.Checked;
                             mb.ExportInfo.RecordDumpTime = cbExRecordDumpTime.Checked;
                             mb.ExportInfo.ResetAutoIncrement = cbExResetAutoIncrement.Checked;

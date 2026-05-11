@@ -1667,6 +1667,8 @@ namespace MySql.Data.MySqlClient
             else
                 sb.AppendLine(_database.Tables[tableName].CreateTableSql);
 
+            sb.AppendLine();
+
             return sb.ToString();
         }
 
@@ -1674,7 +1676,6 @@ namespace MySql.Data.MySqlClient
         {
             StringBuilder sb = new StringBuilder();
 
-            sb.AppendLine();
             sb.AppendLine($"-- ");
             sb.AppendLine($"-- Dumping data for table {tableName}");
             sb.AppendLine($"-- ");

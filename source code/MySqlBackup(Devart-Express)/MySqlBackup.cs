@@ -1666,6 +1666,8 @@ namespace Devart.Data.MySql
             else
                 sb.AppendLine(_database.Tables[tableName].CreateTableSql);
 
+            sb.AppendLine();
+
             return sb.ToString();
         }
 
@@ -1673,7 +1675,6 @@ namespace Devart.Data.MySql
         {
             StringBuilder sb = new StringBuilder();
 
-            sb.AppendLine();
             sb.AppendLine($"-- ");
             sb.AppendLine($"-- Dumping data for table {tableName}");
             sb.AppendLine($"-- ");

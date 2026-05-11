@@ -43,6 +43,7 @@
             this.txtLog = new System.Windows.Forms.TextBox();
             this.btClearLog = new System.Windows.Forms.Button();
             this.btTestConnection = new System.Windows.Forms.Button();
+            this.btOptions = new System.Windows.Forms.Button();
             this.progressBar_TotalRows = new System.Windows.Forms.ProgressBar();
             this.label4 = new System.Windows.Forms.Label();
             this.label5 = new System.Windows.Forms.Label();
@@ -217,7 +218,17 @@
             this.btTestConnection.Text = "Test Connection";
             this.btTestConnection.UseVisualStyleBackColor = true;
             this.btTestConnection.Click += new System.EventHandler(this.btTestConnection_Click);
-            // 
+            //
+            // btOptions
+            //
+            this.btOptions.Location = new System.Drawing.Point(720, 56);
+            this.btOptions.Name = "btOptions";
+            this.btOptions.Size = new System.Drawing.Size(120, 35);
+            this.btOptions.TabIndex = 50;
+            this.btOptions.Text = "Options...";
+            this.btOptions.UseVisualStyleBackColor = true;
+            this.btOptions.Click += new System.EventHandler(this.btOptions_Click);
+            //
             // progressBar_TotalRows
             // 
             this.progressBar_TotalRows.Location = new System.Drawing.Point(478, 177);
@@ -523,6 +534,7 @@
             this.Controls.Add(this.label4);
             this.Controls.Add(this.progressBar_TotalRows);
             this.Controls.Add(this.tableLayoutPanel1);
+            this.Controls.Add(this.btOptions);
             this.Controls.Add(this.btTestConnection);
             this.Controls.Add(this.btClearLog);
             this.Controls.Add(this.txtLog);
@@ -564,6 +576,7 @@
         private System.Windows.Forms.TextBox txtLog;
         private System.Windows.Forms.Button btClearLog;
         private System.Windows.Forms.Button btTestConnection;
+        private System.Windows.Forms.Button btOptions;
         private System.Windows.Forms.ProgressBar progressBar_TotalRows;
         private System.Windows.Forms.Label label4;
         private System.Windows.Forms.Label label5;

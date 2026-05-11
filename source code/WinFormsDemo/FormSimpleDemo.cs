@@ -24,6 +24,9 @@ namespace WinFormsDemo
         // required for stop process
         MySqlBackup mb = null;
 
+        ExportInformations exportInfo = new ExportInformations();
+        ImportInformations importInfo = new ImportInformations();
+
         public FormSimpleDemo()
         {
             InitializeComponent();
@@ -138,6 +141,19 @@ namespace WinFormsDemo
             txtLog.Text = "";
         }
 
+        private void btOptions_Click(object sender, EventArgs e)
+        {
+            using (var f = new FormOptions(exportInfo, importInfo))
+            {
+                if (f.ShowDialog(this) == DialogResult.OK)
+                {
+                    exportInfo = f.ExportInfo;
+                    importInfo = f.ImportInfo;
+                    WriteStatus("Options updated");
+                }
+            }
+        }
+
         #endregion
 
         private void btBackup_Click(object sender, EventArgs e)
@@ -230,6 +246,9 @@ namespace WinFormsDemo
                 using (mb = new MySqlBackup(cmd))
                 {
                     conn.Open();
+
+                    mb.ExportInfo = exportInfo;
+                    mb.ImportInfo = importInfo;
 
                     if (taskType == 1)
                     {
