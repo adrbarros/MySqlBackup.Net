@@ -1652,10 +1652,13 @@ namespace MySql.Data.MySqlClient
         {
             StringBuilder sb = new StringBuilder();
 
-            sb.AppendLine($"-- ");
-            sb.AppendLine($"-- Definition of {tableName}");
-            sb.AppendLine($"-- ");
-            sb.AppendLine();
+            if (ExportInfo.EnableComment)
+            {
+                sb.AppendLine($"-- ");
+                sb.AppendLine($"-- Definition of {tableName}");
+                sb.AppendLine($"-- ");
+                sb.AppendLine();
+            }
 
             if (ExportInfo.AddDropTable)
             {
@@ -1676,10 +1679,13 @@ namespace MySql.Data.MySqlClient
         {
             StringBuilder sb = new StringBuilder();
 
-            sb.AppendLine($"-- ");
-            sb.AppendLine($"-- Dumping data for table {tableName}");
-            sb.AppendLine($"-- ");
-            sb.AppendLine();
+            if (ExportInfo.EnableComment)
+            {
+                sb.AppendLine($"-- ");
+                sb.AppendLine($"-- Dumping data for table {tableName}");
+                sb.AppendLine($"-- ");
+                sb.AppendLine();
+            }
             sb.AppendLine($"/*!40000 ALTER TABLE `{QueryExpress.EscapeIdentifier(tableName)}` DISABLE KEYS */;");
 
             if (ExportInfo.WrapWithinTransaction)
