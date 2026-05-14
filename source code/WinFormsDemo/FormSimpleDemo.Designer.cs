@@ -43,6 +43,7 @@
             this.txtLog = new System.Windows.Forms.TextBox();
             this.btClearLog = new System.Windows.Forms.Button();
             this.btTestConnection = new System.Windows.Forms.Button();
+            this.btOptions = new System.Windows.Forms.Button();
             this.statusStrip1.SuspendLayout();
             this.SuspendLayout();
             // 
@@ -187,12 +188,23 @@
             this.btTestConnection.Text = "Test Connection";
             this.btTestConnection.UseVisualStyleBackColor = true;
             this.btTestConnection.Click += new System.EventHandler(this.btTestConnection_Click);
-            // 
+            //
+            // btOptions
+            //
+            this.btOptions.Location = new System.Drawing.Point(738, 68);
+            this.btOptions.Name = "btOptions";
+            this.btOptions.Size = new System.Drawing.Size(131, 39);
+            this.btOptions.TabIndex = 14;
+            this.btOptions.Text = "Options...";
+            this.btOptions.UseVisualStyleBackColor = true;
+            this.btOptions.Click += new System.EventHandler(this.btOptions_Click);
+            //
             // FormSimpleDemo
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 16F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(884, 561);
+            this.Controls.Add(this.btOptions);
             this.Controls.Add(this.btTestConnection);
             this.Controls.Add(this.btClearLog);
             this.Controls.Add(this.txtLog);
@@ -232,5 +244,6 @@
         private System.Windows.Forms.TextBox txtLog;
         private System.Windows.Forms.Button btClearLog;
         private System.Windows.Forms.Button btTestConnection;
+        private System.Windows.Forms.Button btOptions;
     }
 }

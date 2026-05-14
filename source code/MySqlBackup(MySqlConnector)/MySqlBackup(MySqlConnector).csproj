@@ -14,15 +14,23 @@
 		<PackageProjectUrl>https://github.com/MySqlBackupNET/MySqlBackup.Net</PackageProjectUrl>
 		<RepositoryType>git</RepositoryType>
 		<RepositoryUrl>https://github.com/MySqlBackupNET/MySqlBackup.Net</RepositoryUrl>
-		<Version>2.7</Version>
-		<AssemblyVersion>2.7</AssemblyVersion>
-		<FileVersion>2.7</FileVersion>
+		<Version>2.7.1</Version>
+		<AssemblyVersion>2.7.1</AssemblyVersion>
+		<FileVersion>2.7.1</FileVersion>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<AssemblyName>MySqlBackupNet.MySqlConnector</AssemblyName>
 		<PackageTags>mysql;backup;restore;database;mysqlconnector;csharp;dotnet;sql;export;import</PackageTags>
 		<PackageLicenseExpression>Unlicense</PackageLicenseExpression>
 		<Title>MySqlBackup.NET for MySqlConnector</Title>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>
+
+	<ItemGroup>
+	  <None Include="..\..\README.md">
+	    <Pack>True</Pack>
+	    <PackagePath>\</PackagePath>
+	  </None>
+	</ItemGroup>
 
 	<ItemGroup>
 		<PackageReference Include="MySqlConnector" Version="2.5.0" />

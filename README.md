@@ -2,7 +2,7 @@
 
 *A versatile tool for backing up and restoring MySQL databases in C#, VB.NET, and ASP.NET.*
 
-*Latest Release: v2.7 (March 21st, 2026)*  
+*Latest Release: v2.7.1 (May 11, 2026)*  
 [Change Log](https://github.com/MySqlBackupNET/MySqlBackup.Net/wiki/Change-Log)
 
 ---
@@ -76,11 +76,15 @@ string constr = "server=localhost;user=root;pwd=1234;database=test1;convertzerod
 string filePath = @"C:\backup.sql";
 
 using (MySqlConnection conn = new MySqlConnection(constr))
-using (MySqlCommand cmd = conn.CreateCommand())
-using (MySqlBackup mb = new MySqlBackup(cmd))
 {
-    conn.Open();
-    mb.ExportToFile(filePath);
+    using (MySqlCommand cmd = conn.CreateCommand())
+    {
+        using (MySqlBackup mb = new MySqlBackup(cmd))
+        {
+            conn.Open();
+            mb.ExportToFile(filePath);
+        }
+    }
 }
 ```
 
@@ -90,11 +94,15 @@ string constr = "server=localhost;user=root;pwd=1234;database=test1;convertzerod
 string filePath = @"C:\backup.sql";
 
 using (MySqlConnection conn = new MySqlConnection(constr))
-using (MySqlCommand cmd = conn.CreateCommand())
-using (MySqlBackup mb = new MySqlBackup(cmd))
 {
-    conn.Open();
-    mb.ImportFromFile(filePath);
+    using (MySqlCommand cmd = conn.CreateCommand())
+    {
+        using (MySqlBackup mb = new MySqlBackup(cmd))
+        {
+            conn.Open();
+            mb.ImportFromFile(filePath);
+        }
+    }
 }
 ```
 

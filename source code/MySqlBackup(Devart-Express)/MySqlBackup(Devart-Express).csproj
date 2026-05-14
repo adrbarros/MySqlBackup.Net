@@ -14,15 +14,23 @@
 		<PackageProjectUrl>https://github.com/MySqlBackupNET/MySqlBackup.Net</PackageProjectUrl>
 		<RepositoryType>git</RepositoryType>
 		<RepositoryUrl>https://github.com/MySqlBackupNET/MySqlBackup.Net</RepositoryUrl>
-		<Version>2.7</Version>
-		<AssemblyVersion>2.7</AssemblyVersion>
-		<FileVersion>2.7</FileVersion>
+		<Version>2.7.1</Version>
+		<AssemblyVersion>2.7.1</AssemblyVersion>
+		<FileVersion>2.7.1</FileVersion>
 		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 		<AssemblyName>MySqlBackupNet.DevartExpress</AssemblyName>
 		<PackageTags>mysql;backup;restore;database;devart;dotconnect;express;csharp;dotnet;sql</PackageTags>
 		<PackageLicenseExpression>Unlicense</PackageLicenseExpression>
 		<Title>MySqlBackup.Net for dotConnect.Express.for.MySQL (Devart)</Title>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>
+	
+	<ItemGroup>
+	  <None Include="..\..\README.md">
+	    <Pack>True</Pack>
+	    <PackagePath>\</PackagePath>
+	  </None>
+	</ItemGroup>
 	
 	<ItemGroup>
 		<PackageReference Include="dotConnect.Express.for.MySQL" Version="9.4.290" />
